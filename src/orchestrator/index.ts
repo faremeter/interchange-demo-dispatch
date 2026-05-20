@@ -85,6 +85,17 @@ export interface ProviderCredentials {
   readonly adapter: string;
 }
 
+/**
+ * Inference-layer Dependencies (`fetch`, clock, etc.) threaded down
+ * to every spawned agent. Production callers leave this undefined and
+ * `@intx/agent` falls back to `createDefaultDependencies()` bound to
+ * `globalThis.fetch`. Tests pass `setupHarness().deps` from
+ * `@intx/inference-testing` so every model call is intercepted by the
+ * deterministic harness — that is the only supported mock seam.
+ */
+import type { Dependencies } from "@intx/inference";
+export type { Dependencies };
+
 export interface RunDispatchOptions {
   /**
    * Provider credentials for any real-agent invocations. Required when
@@ -100,6 +111,16 @@ export interface RunDispatchOptions {
    * circuit immediately.
    */
   readonly resume?: (runDir: string) => Promise<Run>;
+  /**
+   * Inference-layer `Dependencies` (fetch stub, clock, etc.). When
+   * present, every agent spawned by the orchestrator threads this
+   * through to `createAgent`'s `deps` parameter, so model calls go
+   * through the same fetch instance. Tests pass
+   * `setupHarness().deps` from `@intx/inference-testing` to intercept
+   * model calls deterministically. Omit for production runs and the
+   * agent factory falls back to `globalThis.fetch`.
+   */
+  readonly deps?: Dependencies;
   /**
    * Scripted planner override forwarded to `plan(...)`. When set,
    * `plan` never spawns the planner agent.
