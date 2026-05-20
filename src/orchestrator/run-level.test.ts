@@ -201,6 +201,10 @@ function fakeAgent(closed: { value: boolean }): ImplementerAgentHandle {
     async close() {
       closed.value = true;
     },
+    async *stream() {
+      // Empty stream — tests that exercise inference.error draining
+      // would override this with a scripted iterator.
+    },
   };
 }
 

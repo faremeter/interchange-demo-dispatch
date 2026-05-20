@@ -40,6 +40,7 @@ import { join } from "node:path";
 import { stringify as stringifyYAML } from "yaml";
 
 import { AgentClosedError } from "@intx/agent";
+import type { ReactorEmittedEvent } from "@intx/inference";
 import type { ReactorDirector } from "@intx/types/runtime";
 
 import { writeRun } from "../state/persist.js";
@@ -89,6 +90,13 @@ export interface ImplementerSpawnInput {
 export interface ImplementerAgentHandle {
   send(content: string): Promise<unknown>;
   close(): Promise<void>;
+  /**
+   * Event stream exposed by `@intx/agent`'s `Agent`. The orchestrator
+   * drains it concurrently with `send` so provider-side errors
+   * (inference.error) surface to stderr instead of vanishing into a
+   * silently-closed reactor.
+   */
+  stream(): AsyncIterable<ReactorEmittedEvent>;
 }
 
 export type ImplementerSpawner = (
@@ -340,6 +348,26 @@ async function dispatchOneTask(args: {
     ...(director !== undefined ? { director } : {}),
   };
   const handle = await spawner(spawnInput);
+
+  // Drain the implementer agent's event stream so any inference.error
+  // surfaces to stderr — without this, a 4xx from the provider drops
+  // the reactor silently and the orchestrator only sees the terse
+  // AgentClosedError.
+  const drain = (async () => {
+    try {
+      for await (const event of handle.agent.stream()) {
+        if (event.type === "inference.error") {
+          // eslint-disable-next-line no-console
+          console.error(
+            `[implementer ${task.id}] inference.error: ${JSON.stringify(event.data?.error ?? event.data)}`,
+          );
+        }
+      }
+    } catch {
+      // The stream throws on agent close; not a failure to surface.
+    }
+  })();
+
   let submitted: SubmittedOutput | null = null;
   try {
     // Race the implementer's `awaitSubmitOutput` against the lifecycle
@@ -362,6 +390,7 @@ async function dispatchOneTask(args: {
     });
   } finally {
     await handle.agent.close();
+    await drain;
   }
 
   await writeFile(
