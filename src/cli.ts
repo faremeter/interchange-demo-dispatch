@@ -33,6 +33,7 @@ import { pathToFileURL } from "node:url";
 
 import { runDispatch, type RunDispatchOptions } from "./orchestrator/index.js";
 import type { SpecRef } from "./orchestrator/index.js";
+import { resume } from "./orchestrator/resume.js";
 import { tearDownLevelWorktree } from "./orchestrator/worktree.js";
 import { loadRun } from "./state/index.js";
 
@@ -83,7 +84,13 @@ async function runDispatchVerb(argv: readonly string[]): Promise<number> {
     ...(skipBaseline ? { skipBaseline: true } : {}),
   };
 
-  const options = scriptsPath === null ? {} : await loadScripts(scriptsPath);
+  // Wire 7b's resume as the default options.resume so the CLI picks up
+  // any previously-persisted run state. `--scripts` callers can override
+  // by exporting their own `resume` from the scripts module.
+  const baseOptions: RunDispatchOptions = { resume };
+  const overrides =
+    scriptsPath === null ? {} : await loadScripts(scriptsPath);
+  const options: RunDispatchOptions = { ...baseOptions, ...overrides };
   const run = await runDispatch(spec, options);
 
   const reportPath = resolve(cwd, "dispatch", runName, "report.md");
