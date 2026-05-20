@@ -61,10 +61,13 @@ async function gitOrThrow(cwd: string, args: string[]): Promise<string> {
   return result.stdout.trim();
 }
 
-// The integration branch must not share a prefix with the level branch names
-// or git will reject `dispatch/<run>/level-N` ("cannot lock ref"). The
-// production orchestrator (5a) will need to enforce the same constraint.
-const INTEGRATION_BRANCH = "integration-test-run";
+// Level branches use a dash separator (`dispatch/<run>-level-N`) so they
+// do not collide with the integration branch `dispatch/<run>` — git refuses
+// to have both `dispatch/foo` and `dispatch/foo/level-1` as refs at the
+// same time. With the dash form, both fit in the `dispatch/` namespace
+// without conflict, so we can use the production integration branch name
+// in tests.
+const INTEGRATION_BRANCH = "dispatch/test-run";
 const RUN_NAME = "test-run";
 
 function makeRun(name: string, boundaries: Record<number, string> = {}): Run {
@@ -128,7 +131,7 @@ describe("provisionLevelWorktree", () => {
 
   test("creates a level-2 branch off the prior level's persisted boundary", async () => {
     // Establish a "level 1" commit on a branch that becomes the boundary.
-    const priorBranch = "dispatch/test-run/level-1";
+    const priorBranch = "dispatch/test-run-level-1";
     await gitOrThrow(repoRoot, ["branch", priorBranch]);
     await gitOrThrow(repoRoot, ["checkout", priorBranch]);
     await writeFile(join(repoRoot, "L1.txt"), "level 1\n");
@@ -140,7 +143,9 @@ describe("provisionLevelWorktree", () => {
     ]);
     await gitOrThrow(repoRoot, ["checkout", "main"]);
 
-    const run = makeRun(RUN_NAME, { 1: priorBoundary });
+    // levelBoundaries[N] is the pre-level-N boundary. For level 2, that's
+    // the post-level-1 HEAD.
+    const run = makeRun(RUN_NAME, { 2: priorBoundary });
     const result = await provisionLevelWorktree({
       run,
       level: 2,

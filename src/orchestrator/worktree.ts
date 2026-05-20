@@ -229,12 +229,16 @@ export async function tearDownLevelWorktree(
 }
 
 /**
- * Branch naming convention: `dispatch/<runName>/level-<N>`. Lifted from the
- * spec's isolation section so callers in other files (notably `commitLevel`
- * in 5c) can recompute the same name without a circular import.
+ * Branch naming convention: `dispatch/<runName>-level-<N>`. The dash (not
+ * slash) between `<runName>` and `level` is deliberate — using a slash here
+ * would collide with the integration branch `dispatch/<runName>`, which git
+ * refuses (`dispatch/foo` and `dispatch/foo/level-1` cannot both exist as
+ * refs simultaneously). Lifted from the spec's isolation section so callers
+ * in other files (notably `commitLevel` in 5c) can recompute the same name
+ * without a circular import.
  */
 export function buildLevelBranchName(runName: string, level: number): string {
-  return `dispatch/${runName}/level-${String(level)}`;
+  return `dispatch/${runName}-level-${String(level)}`;
 }
 
 /**
@@ -324,12 +328,16 @@ async function resolveBaseRef(
   if (level <= 1) {
     return run.integrationBranch;
   }
-  const priorBoundary = run.levelBoundaries[level - 1];
+  // `levelBoundaries[N]` is the pre-level-N boundary (5c writes
+  // `levelBoundaries[level + 1]` after committing level N, which is the
+  // pre-level-(N+1) boundary). Starting level N, we want the pre-N
+  // boundary — that's `levelBoundaries[level]`, not `[level - 1]`.
+  const priorBoundary = run.levelBoundaries[level];
   if (priorBoundary === undefined) {
     throw new Error(
       `provisionLevelWorktree: level ${String(
         level,
-      )} requested but levelBoundaries[${String(level - 1)}] is not yet persisted`,
+      )} requested but levelBoundaries[${String(level)}] is not yet persisted`,
     );
   }
   // Verify the boundary still resolves to a commit; surface missing-history
