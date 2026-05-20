@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 
-// `intx-dispatch` command-line entry point.
+// `interchange-demo-dispatch` command-line entry point.
 //
 // Two verbs:
 //
-//   intx-dispatch [run-name] [--skip-baseline] [--scripts <path>]
+//   interchange-demo-dispatch [run-name] [--skip-baseline] [--scripts <path>]
 //       Run a dispatch against ./spec.md and ./dispatch-config.yaml in
 //       cwd, materializing run state under
 //       `<cwd>/dispatch/<run-name>/`. The run-name defaults to a
 //       timestamp-derived identifier when omitted.
 //
-//   intx-dispatch teardown <run-name>
+//   interchange-demo-dispatch teardown <run-name>
 //       Remove every per-level worktree associated with the named
 //       run. Does NOT delete the dispatch directory or its contents
 //       — operator-inspectable state survives so the operator can
@@ -237,7 +237,7 @@ void main(process.argv.slice(2)).then(
   },
   (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`intx-dispatch: ${message}`);
+    console.error(`interchange-demo-dispatch: ${message}`);
     process.exit(1);
   },
 );

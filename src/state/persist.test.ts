@@ -6,11 +6,11 @@ import { writeRun, loadRun } from "./persist.js";
 import type { Run } from "./types.js";
 
 const sampleRun: Run = {
-  name: "intx-dispatch-poc",
+  name: "interchange-demo-dispatch-poc",
   specPath: "spec.md",
   targetRepoPath: "/path/to/repo",
-  integrationBranch: "dispatch/intx-dispatch-poc",
-  baselineBuildLogPath: "dispatch/intx-dispatch-poc/baseline-build.log",
+  integrationBranch: "dispatch/interchange-demo-dispatch-poc",
+  baselineBuildLogPath: "dispatch/interchange-demo-dispatch-poc/baseline-build.log",
   baselineFailures: [
     {
       id: "bf-1",
@@ -73,7 +73,7 @@ describe("writeRun + loadRun round-trip", () => {
     await writeRun(path, sampleRun);
     const raw = await readFile(path, "utf8");
     expect(raw.startsWith("{")).toBe(false);
-    expect(raw).toContain("name: intx-dispatch-poc");
+    expect(raw).toContain("name: interchange-demo-dispatch-poc");
     expect(raw).toContain("commitStrategy: per-task");
   });
 });

@@ -129,11 +129,11 @@ const validTask: Task = {
 };
 
 const validRun: Run = {
-  name: "intx-dispatch-poc",
+  name: "interchange-demo-dispatch-poc",
   specPath: "spec.md",
   targetRepoPath: "/path/to/repo",
-  integrationBranch: "dispatch/intx-dispatch-poc",
-  baselineBuildLogPath: "dispatch/intx-dispatch-poc/baseline-build.log",
+  integrationBranch: "dispatch/interchange-demo-dispatch-poc",
+  baselineBuildLogPath: "dispatch/interchange-demo-dispatch-poc/baseline-build.log",
   baselineFailures: [validBuildFailure],
   commitStrategy: "per-task",
   status: "planning",

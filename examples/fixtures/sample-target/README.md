@@ -1,7 +1,7 @@
-# intx-dispatch sample target
+# interchange-demo-dispatch sample target
 
 A minimal bun TypeScript project used as the fixture for the
-intx-dispatch smoke test (see `examples/smoke-test.ts`).
+interchange-demo-dispatch smoke test (see `examples/smoke-test.ts`).
 
 Out of the box it exposes a single `hello()` function and a passing
 test. The smoke spec at `examples/hello-world-spec.md` describes a

@@ -47,7 +47,7 @@
 //   directors). Resume's job here is therefore on-disk consolidation:
 //   normalize the persisted state so a subsequent invocation of
 //   `runDispatch` (with the appropriate options) can pick up cleanly.
-//   See `dispatch/intx-dispatch-poc/7b-resume/output.yaml`'s deviation
+//   See `dispatch/interchange-demo-dispatch-poc/7b-resume/output.yaml`'s deviation
 //   note for the corresponding follow-up.
 
 import { rm, stat, readdir } from "node:fs/promises";

@@ -1,10 +1,10 @@
 {
-  "name": "intx-dispatch",
+  "name": "interchange-demo-dispatch",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "bin": {
-    "intx-dispatch": "./dist/cli.js"
+    "interchange-demo-dispatch": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -b",

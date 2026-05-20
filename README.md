@@ -1,4 +1,4 @@
-# intx-dispatch
+# interchange-demo-dispatch
 
 A proof-of-concept orchestrator that coordinates multiple AI coding agents
 working in parallel on the same codebase, with deterministic state, typed
@@ -18,7 +18,7 @@ but it's fragile: the same prompt produces different decisions on different
 days; failure modes are silent; state lives in the model's head rather
 than in a file you can inspect.
 
-`intx-dispatch` is a different bet. It puts the orchestrator in plain
+`interchange-demo-dispatch` is a different bet. It puts the orchestrator in plain
 TypeScript code, gives every agent a typed tool interface, and persists
 every state transition to disk as a YAML document validated against an
 [arktype](https://arktype.io/) schema. Agents are still LLMs; the part
@@ -66,7 +66,7 @@ The orchestrator design in `spec.md` is a self-referential exercise:
 this repository was constructed by a prose-based version of the same
 orchestrator, running an 18-task DAG against this very spec. The
 result is a working code version of the prose skill that built it.
-Notes from that run live in `dispatch/intx-dispatch-poc/` (gitignored,
+Notes from that run live in `dispatch/interchange-demo-dispatch-poc/` (gitignored,
 present in the working copy for inspection).
 
 The dispatch surfaced two real bugs in 5b (a branch-naming collision
@@ -122,7 +122,7 @@ src/
                    point from spec.md §632-§677.
   state/           Persisted Run document — arktype schemas, atomic YAML
                    writes, single source of truth for the orchestrator.
-  cli.ts           intx-dispatch binary (verbs: default = run; teardown).
+  cli.ts           interchange-demo-dispatch binary (verbs: default = run; teardown).
   dag-validate.ts  Pure DAG validation used by both the planner agent
                    and resume.
   karen.ts         Deterministic policy: per-deviation severity → action.
@@ -152,7 +152,7 @@ spec.md            The brief that drove the build.
   in `dispatch-config.yaml`, but there is no provider abstraction
   beyond that.
 - **Two open bugs in rebuild semantics.** Documented in `dispatch/
-  intx-dispatch-poc/8a-smoke-spec/output.yaml`; the smoke test works
+  interchange-demo-dispatch-poc/8a-smoke-spec/output.yaml`; the smoke test works
   around them by seeding amendments at a leaf level. Fixing them in
   `src/orchestrator/index.ts` and `src/orchestrator/commit-level.ts`
   is a tracked follow-up.

@@ -1,4 +1,4 @@
-// End-to-end smoke test for `intx-dispatch` — the PoC's Definition-of-
+// End-to-end smoke test for `interchange-demo-dispatch` — the PoC's Definition-of-
 // Success milestone.
 //
 // The test sets up `examples/fixtures/sample-target/` inside a temp
@@ -327,10 +327,10 @@ export function hello(): string {
 }
 `;
 
-const WIRED_README = `# intx-dispatch sample target
+const WIRED_README = `# interchange-demo-dispatch sample target
 
 A minimal bun TypeScript project used as the fixture for the
-intx-dispatch smoke test (see \`examples/smoke-test.ts\`).
+interchange-demo-dispatch smoke test (see \`examples/smoke-test.ts\`).
 
 After the smoke spec lands it also exposes \`greet(name)\` and
 \`formatHello(name)\` alongside the original \`hello()\` function.
@@ -544,7 +544,7 @@ afterEach(async () => {
 
 const SMOKE_TIMEOUT_MS = 180_000;
 
-describe("intx-dispatch smoke spec", () => {
+describe("interchange-demo-dispatch smoke spec", () => {
   test("DoS 1-5: end-to-end forward path against the fixture target", async () => {
     active = await driveSmokeRun("hello-world-poc");
     const { run, workDir, runDir } = active;

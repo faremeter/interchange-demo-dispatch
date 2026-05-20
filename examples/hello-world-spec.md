@@ -1,6 +1,6 @@
 # Hello-world smoke spec
 
-This is the Definition-of-Success smoke spec for `intx-dispatch`. The
+This is the Definition-of-Success smoke spec for `interchange-demo-dispatch`. The
 orchestrator drives the three tasks below against
 `examples/fixtures/sample-target/`, the small TypeScript project that
 ships with this repo for end-to-end testing.

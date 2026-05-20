@@ -186,7 +186,7 @@ export const buildGateRunner = async ({ run }) => {
 export const taskVerifier = async () => ({ ok: true, output: "" });
 `;
 
-describe("intx-dispatch CLI", () => {
+describe("interchange-demo-dispatch CLI", () => {
   test("happy path: exit 0, report path printed, run-state status done", async () => {
     await writeFile(join(workDir, "scripts.mjs"), SCRIPTS_CONTENT, "utf8");
 

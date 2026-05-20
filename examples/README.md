@@ -1,6 +1,6 @@
-# intx-dispatch examples
+# interchange-demo-dispatch examples
 
-This directory holds the end-to-end smoke test for `intx-dispatch` —
+This directory holds the end-to-end smoke test for `interchange-demo-dispatch` —
 the Definition-of-Success demonstration described in
 `spec.md` §87-§108.
 
@@ -109,7 +109,7 @@ The smoke test surfaced several orchestrator gaps. These are real
 behaviour observed during the smoke run; the orchestrator code
 itself was deliberately left untouched per the task's hard
 constraints. Each is reported as a major or moderate deviation in
-`dispatch/intx-dispatch-poc/8a-smoke-spec/output.yaml`:
+`dispatch/interchange-demo-dispatch-poc/8a-smoke-spec/output.yaml`:
 
 - **Amendment rebuild does not reset the worktree.** 7a's
   `rebuildLevel` callback re-runs `commitLevel` against the same
