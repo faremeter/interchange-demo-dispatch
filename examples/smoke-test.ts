@@ -1,23 +1,28 @@
 // Smoke tests for `interchange-demo-dispatch`.
 //
-// Two tests live here:
+// Three tests live here:
 //
 //   1. `planner-only smoke` — the original test (preserved). Drives only
 //      `initRun` + `plan` against the fixture, asserts the planner emits a
 //      valid 3-task DAG. Acts as a sanity check that the planner wire path
 //      still works in isolation.
 //
-//   2. `runDispatch end-to-end smoke` — the new test. Drives `runDispatch`
-//      against a 2-task / 2-level plan (L1 greet, L2 wire) through every
-//      agent role (planner, implementer, critic, gate-critic) using the
-//      `@intx/inference-testing` deterministic harness. Asserts the
-//      Definition-of-Success criteria the smoke can exercise structurally:
+//   2. `runDispatch end-to-end smoke` — drives `runDispatch` against a
+//      2-task / 2-level plan (L1 greet, L2 wire) through every agent role
+//      (planner, implementer, critic, gate-critic) and Phase 5 verification
+//      using the `@intx/inference-testing` deterministic harness. Asserts
+//      the Definition-of-Success criteria the smoke can exercise
+//      structurally:
 //        DoS 1 — dispatch.yaml matches the expected DAG shape.
 //        DoS 2 — per-level worktrees are provisioned and survive the run.
 //        DoS 3 — per-task critic + level gate critic fire (bounded by their
 //                first-pass `pass` verdicts; the amendment loop is not
 //                stressed here).
 //        DoS 4 — per-task commits land at fan-in before each level gate.
+//        DoS 5 — Phase 5 verification runs against the captured baseline
+//                via an injected `buildGateRunner` stub whose output matches
+//                the baseline byte-for-byte. Asserts the run lands a single
+//                `pass` verification round and transitions to `done`.
 //
 //      Scope reduction (per the task brief's allowance): this is a
 //      narrowed option (a) — 2 levels of 1 task each, rather than the full
@@ -28,18 +33,29 @@
 //      removes parallelism so the registered matchers can be ordered by
 //      observation order without ambiguity.
 //
-//      DoS 5 (Phase 5 verification against baseline) and DoS 6 (resume
-//      from persisted state) are deferred:
-//        - DoS 5 requires capturing a real baseline build of the fixture,
-//          which means `bun install` + running the full build gate. That
-//          breaks the < 1-minute budget and would require network access
-//          for first-run dependency resolution.
-//        - DoS 6 requires a separate kill-and-resume harness run. The
-//          orchestrator's resume support is partial today (only
-//          `planning` / `gating-plan` statuses route back into the
-//          forward path); a meaningful resume test would need either
-//          orchestrator support for `executing`/`verifying` resume or a
-//          contrived planning-phase interruption.
+//      DoS 5 baseline rationale: the smoke writes a custom
+//      `dispatch-config.yaml` into the temp work-dir whose `buildGate` is
+//      a deterministic single `echo` command. That gives `initRun` a real
+//      baseline log (captured via actual shell — `captureBaseline` runs
+//      the configured commands) without needing `bun install` against the
+//      fixture target. The Phase-5 build is then stubbed via
+//      `buildGateRunner` so the final-build output matches baseline
+//      verbatim and the normalizer reports no regression.
+//
+//   3. `runDispatch resume smoke` — exercises the `planning`-status
+//      resume case (the only status `continueAfterResume` currently
+//      supports — `executing`/`verifying`/`fixing-verification`/
+//      `consolidating` resume is an explicit PoC gap). The test:
+//        - Calls `initRun` once to materialise a fresh run-state.yaml
+//          with `status: "planning"`, `tasks: []`, and a real baseline
+//          captured from the deterministic config.
+//        - Re-invokes `runDispatch` against the same run dir, passing an
+//          instrumented wrapper around the production `resume` callback
+//          from `src/orchestrator/resume.ts`.
+//        - Asserts the resume hook was called exactly once, that the
+//          baseline state (`baselineBuildLogPath`, `baselineFailures`)
+//          captured by the first `initRun` survives unchanged, and that
+//          the resumed run completes successfully (`status: "done"`).
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
@@ -66,7 +82,12 @@ import {
 import { initRun } from "../src/orchestrator/init.js";
 import { plan } from "../src/orchestrator/plan.js";
 import { runDispatch } from "../src/orchestrator/index.js";
-import { loadRun } from "../src/state/index.js";
+import type {
+  BuildGateRunner,
+  TaskVerifier,
+} from "../src/orchestrator/index.js";
+import { resume } from "../src/orchestrator/resume.js";
+import { loadRun, type Run } from "../src/state/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_SRC = resolve(HERE, "fixtures", "sample-target");
@@ -119,9 +140,8 @@ async function gitOrThrow(cwd: string, args: string[]): Promise<string> {
 
 // Stand up a fresh temp copy of the fixture target with the smoke spec
 // copied in as `spec.md` and an (empty) `skills/` directory so the
-// planner's loader is happy. Baseline capture is skipped because the
-// smoke tests do not exercise Phase 5; that keeps the tests independent
-// of `bun install` and the fixture's build toolchain.
+// planner's loader is happy. Whether baseline capture runs at all is the
+// caller's choice (driven by `skipBaseline` on the dispatch spec).
 async function setupFixtureRepo(slug: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), `intx-smoke-${slug}-`));
   await cp(FIXTURE_SRC, dir, { recursive: true });
@@ -133,6 +153,31 @@ async function setupFixtureRepo(slug: string): Promise<string> {
   await gitOrThrow(dir, ["add", "."]);
   await gitOrThrow(dir, ["commit", "-q", "-m", "initial fixture state"]);
   return dir;
+}
+
+// Overwrite the fixture-copied `dispatch-config.yaml` with a
+// deterministic minimal config. The default fixture config declares a
+// `bun run lint && bun run build && bun run test` build gate, which
+// `captureBaseline` would actually shell out to during `initRun` — and
+// the fixture's package.json has no resolved `node_modules`, so that
+// would fail and pollute the captured log with non-deterministic output.
+// A single `echo` command produces a stable, hermetic baseline log that
+// the Phase-5 `buildGateRunner` stub can mirror byte-for-byte.
+async function writeDeterministicDispatchConfig(dir: string): Promise<void> {
+  const body = [
+    "buildGate:",
+    "  - echo baseline-marker",
+    "modelConfig:",
+    "  planner: smoke/planner",
+    "  implementer: smoke/implementer",
+    "  critic: smoke/critic",
+    "  gateCritic: smoke/gate-critic",
+    "  greybeard: smoke/greybeard",
+    "  attribution: smoke/attribution",
+    "  fixAgent: smoke/fix-agent",
+    "",
+  ].join("\n");
+  await writeFile(join(dir, "dispatch-config.yaml"), body, "utf8");
 }
 
 // Plan markdown body padded to clear the planner schema's 200-character
@@ -635,9 +680,10 @@ async function listCommitsOnBranch(
 }
 
 describe("interchange-demo-dispatch runDispatch end-to-end", () => {
-  test("drives planner + implementers + critics + gate critics for a 2-level plan", async () => {
+  test("drives planner + implementers + critics + gate critics + Phase 5 verification for a 2-level plan", async () => {
     const harness = setupHarness();
     const workDir = await setupFixtureRepo("dispatch");
+    await writeDeterministicDispatchConfig(workDir);
     active = { harness, workDir };
 
     const runName = "dispatch-smoke";
@@ -720,9 +766,30 @@ describe("interchange-demo-dispatch runDispatch end-to-end", () => {
       targetRepoPath: workDir,
       runName,
       dispatchConfigPath: join(workDir, "dispatch-config.yaml"),
-      // Skip baseline so Phase 5 short-circuits — see file header for
-      // why DoS 5 is deferred.
-      skipBaseline: true,
+    };
+
+    // Phase-5 build-gate stub for DoS 5: returns the captured baseline
+    // log verbatim so the normalizer reports "no regression". The
+    // baseline file is materialised by `initRun`'s call to
+    // `captureBaseline` (against the deterministic dispatch-config), so
+    // the read is deferred until the runner is actually invoked.
+    const baselineLogPath = join(runDir, "baseline-build.log");
+    const buildGateCalls: number[] = [];
+    const buildGateRunner: BuildGateRunner = async () => {
+      buildGateCalls.push(buildGateCalls.length + 1);
+      const baseline = await readFile(baselineLogPath, "utf8");
+      return { output: baseline, exitCode: 0 };
+    };
+    // `taskVerifier` is unused in the no-regression path (Phase 5
+    // never enters the fix loop), but the orchestrator wires it
+    // anyway and the production default tries to shell out — point it
+    // at a stub that mirrors the build gate's success shape so a
+    // future change that does invoke it surfaces deterministically.
+    const taskVerifierCalls: number[] = [];
+    const taskVerifier: TaskVerifier = async () => {
+      taskVerifierCalls.push(taskVerifierCalls.length + 1);
+      const baseline = await readFile(baselineLogPath, "utf8");
+      return { ok: true, output: baseline };
     };
 
     // Drive runDispatch concurrently with `harness.run()`. The
@@ -739,6 +806,8 @@ describe("interchange-demo-dispatch runDispatch end-to-end", () => {
         adapter: "openai",
       },
       deps: harness.deps,
+      buildGateRunner,
+      taskVerifier,
     });
 
     await harness.run();
@@ -866,6 +935,33 @@ describe("interchange-demo-dispatch runDispatch end-to-end", () => {
       "2a-wire",
     ]);
 
+    // DoS 5 — Phase 5 verification ran against the captured baseline.
+    // The `buildGateRunner` stub was invoked exactly once (the no-
+    // regression path returns immediately after the first matching
+    // build), and `taskVerifier` was never invoked (no fix loop ran).
+    // The persisted run carries a single verification round with
+    // outcome=pass and the baseline path the orchestrator captured.
+    expect(buildGateCalls.length).toBe(1);
+    expect(taskVerifierCalls.length).toBe(0);
+    expect(finalRun.baselineBuildLogPath).toBe(baselineLogPath);
+    expect(finalRun.baselineFailures).toEqual([]);
+    expect(finalRun.verificationRounds.length).toBe(1);
+    const verificationRound = finalRun.verificationRounds[0];
+    if (verificationRound === undefined) {
+      throw new Error("expected one verification round on the final run");
+    }
+    expect(verificationRound.outcome).toBe("pass");
+    expect(verificationRound.newFailures).toEqual([]);
+    expect(verificationRound.attribution).toEqual({});
+    expect(verificationRound.rebuildFromLevel).toBeNull();
+    // The Phase-5 engine writes a per-round `final-build.log-<round>`
+    // artifact alongside the run-state. Confirm the no-regression run
+    // emitted exactly the first round's log.
+    expect(await pathExists(join(runDir, "final-build.log-1"))).toBe(true);
+    expect(verificationRound.finalBuildLogPath).toBe(
+      join(runDir, "final-build.log-1"),
+    );
+
     // Sanity check that no stray inference fetch slipped past the
     // matchers — the `await harness.run()` above already throws
     // `UnmatchedFetchError` on quiescence if any fetch is parked
@@ -874,5 +970,205 @@ describe("interchange-demo-dispatch runDispatch end-to-end", () => {
     const runDirListing = await readdir(runDir);
     expect(runDirListing).toContain("worktrees");
     expect(runDirListing).toContain("run-state.yaml");
+    expect(runDirListing).toContain("baseline-build.log");
+  }, SMOKE_TIMEOUT_MS);
+});
+
+// =====================================================================
+// runDispatch resume smoke (DoS 6)
+// =====================================================================
+//
+// Exercises the `planning`-status resume case. `initRun` is invoked
+// once to set up the dispatch directory, integration branch, and
+// run-state.yaml at status=planning with no tasks yet (a natural
+// interruption point — the operator's process died after baseline
+// capture but before the planner posted its first proposeTask call).
+// `runDispatch` is then invoked against the same run dir; the
+// orchestrator sees the existing run-state.yaml, calls the supplied
+// resume hook, and routes back into the plan stage via
+// `continueAfterResume`.
+
+// Single-task plan: L1 greet only. Mirrors the two-task helper's
+// schema but emits a single proposeTask before finalizePlan.
+function buildPlannerToolCallsSingleTask(): {
+  callId: string;
+  name: string;
+  argsJSON: string;
+}[] {
+  const greetArgs = {
+    idHint: "greet",
+    level: 1,
+    dependsOn: [],
+    objective: "Add greet(name) to src/greet.ts with a covering test",
+    planMarkdown: planBody(
+      "greet",
+      1,
+      "Add greet(name) returning `Hello, ${name}!` plus a test.",
+    ),
+    agentType: "general",
+    class: "feature",
+    verifyCommands: [],
+    critiqueEnabled: true,
+  };
+  return [
+    {
+      callId: "call-propose-greet",
+      name: "proposeTask",
+      argsJSON: JSON.stringify(greetArgs),
+    },
+    { callId: "call-finalize", name: "finalizePlan", argsJSON: "{}" },
+  ];
+}
+
+describe("interchange-demo-dispatch runDispatch resume", () => {
+  test("resumes a planning-status run, replays the forward path, and reaches done", async () => {
+    const harness = setupHarness();
+    const workDir = await setupFixtureRepo("resume");
+    await writeDeterministicDispatchConfig(workDir);
+    active = { harness, workDir };
+
+    const runName = "resume-smoke";
+    const runDir = join(workDir, "dispatch", runName);
+    const l1WorktreePath = join(runDir, "worktrees", "level-1");
+
+    const spec = {
+      specPath: join(workDir, "spec.md"),
+      targetRepoPath: workDir,
+      runName,
+      dispatchConfigPath: join(workDir, "dispatch-config.yaml"),
+    };
+
+    // Stage 1: materialise a fresh planning-state run on disk. After
+    // this call, run-state.yaml exists with status=planning, tasks=[]
+    // and the baseline log was captured against the deterministic
+    // dispatch-config.
+    const initialInit = await initRun(spec);
+    expect(initialInit.run.status).toBe("planning");
+    expect(initialInit.run.tasks).toEqual([]);
+    const stagedBaselineLogPath = initialInit.run.baselineBuildLogPath;
+    const stagedBaselineFailures = initialInit.run.baselineFailures;
+    expect(stagedBaselineLogPath).toBe(join(runDir, "baseline-build.log"));
+    expect(await pathExists(stagedBaselineLogPath)).toBe(true);
+
+    // Stage 2: build the harness scenarios for the planner + a single
+    // L1 task (1a-greet) and its critic/gate. The plan deliberately
+    // emits exactly one task at one level — the bare minimum that
+    // exercises the full forward path post-resume.
+    let cursor = 10;
+    cursor = registerScriptedTurn(
+      harness,
+      buildPlannerToolCallsSingleTask(),
+      cursor,
+    );
+    cursor = registerScriptedTurn(
+      harness,
+      buildImplementerTurn("1a-greet", l1WorktreePath, [
+        { relativePath: "src/greet.ts", content: GREET_TS_SOURCE },
+        { relativePath: "src/greet.test.ts", content: GREET_TEST_SOURCE },
+      ]),
+      cursor + 10,
+    );
+    cursor = registerScriptedTurn(
+      harness,
+      buildCriticTurn("1a-greet"),
+      cursor + 10,
+    );
+    cursor = registerScriptedTurn(
+      harness,
+      buildGateCriticTurn(1, ["1a-greet"]),
+      cursor + 10,
+    );
+    void cursor;
+
+    // Stage 3: instrumented resume. Wraps the production `resume`
+    // implementation (which classifies the interruption and returns
+    // the normalised state) with a call counter so the test can
+    // assert it was invoked exactly once. The classification path
+    // here is case 6 (status=planning, tasks=[]); the wrapped
+    // function is a pass-through, so the returned Run is the staged
+    // state verbatim.
+    let resumeCalls = 0;
+    const resumeArgs: string[] = [];
+    const resumedRuns: Run[] = [];
+    const instrumentedResume = async (dir: string): Promise<Run> => {
+      resumeCalls += 1;
+      resumeArgs.push(dir);
+      const r = await resume(dir);
+      resumedRuns.push(r);
+      return r;
+    };
+
+    // Stage 4: Phase-5 stubs identical in shape to the 2-level test.
+    // The resumed run produces a single task with non-empty
+    // `filesModified`, so Phase 5 will not short-circuit on the
+    // empty-modifications check; the stub must return baseline-
+    // matching output so the no-regression path fires.
+    const buildGateRunner: BuildGateRunner = async () => {
+      const baseline = await readFile(stagedBaselineLogPath, "utf8");
+      return { output: baseline, exitCode: 0 };
+    };
+    const taskVerifier: TaskVerifier = async () => {
+      const baseline = await readFile(stagedBaselineLogPath, "utf8");
+      return { ok: true, output: baseline };
+    };
+
+    // Stage 5: re-invoke runDispatch. The orchestrator detects the
+    // existing run-state.yaml, calls our instrumented resume hook,
+    // routes into `continueAfterResume`, and runs the forward path
+    // from the plan stage onward.
+    const dispatchPromise = runDispatch(spec, {
+      provider: {
+        baseURL: "https://opencode-go.test/v1",
+        apiKey: "smoke-test-key",
+        adapter: "openai",
+      },
+      deps: harness.deps,
+      resume: instrumentedResume,
+      buildGateRunner,
+      taskVerifier,
+    });
+
+    await harness.run();
+    const finalRun = await dispatchPromise;
+
+    // The resume hook fired exactly once with the canonical run
+    // directory.
+    expect(resumeCalls).toBe(1);
+    expect(resumeArgs).toEqual([runDir]);
+
+    // The hook's return value matched the staged planning state.
+    expect(resumedRuns.length).toBe(1);
+    const resumed = resumedRuns[0];
+    if (resumed === undefined) throw new Error("expected resumed run");
+    expect(resumed.status).toBe("planning");
+    expect(resumed.tasks).toEqual([]);
+    expect(resumed.baselineBuildLogPath).toBe(stagedBaselineLogPath);
+
+    // `runDispatch` did NOT re-run `initRun` — the baseline state
+    // captured by the original init survived the resume verbatim.
+    expect(finalRun.baselineBuildLogPath).toBe(stagedBaselineLogPath);
+    expect(finalRun.baselineFailures).toEqual(stagedBaselineFailures);
+    expect(finalRun.createdAt).toBe(initialInit.run.createdAt);
+    expect(finalRun.integrationBranch).toBe(initialInit.run.integrationBranch);
+
+    // The resumed run completed.
+    expect(finalRun.status).toBe("done");
+    expect(finalRun.tasks.length).toBe(1);
+    const onlyTask = finalRun.tasks[0];
+    if (onlyTask === undefined) throw new Error("expected one task on resumed run");
+    expect(onlyTask.id).toBe("1a-greet");
+    expect(onlyTask.level).toBe(1);
+
+    // The Phase-5 verification round landed `pass` (the resume
+    // path's baseline is non-empty, so Phase 5 ran end-to-end).
+    expect(finalRun.verificationRounds.length).toBe(1);
+    const round = finalRun.verificationRounds[0];
+    if (round === undefined) throw new Error("expected one verification round");
+    expect(round.outcome).toBe("pass");
+
+    // The persisted state matches the returned run.
+    const persisted = await loadRun(join(runDir, "run-state.yaml"));
+    expect(persisted.status).toBe("done");
+    expect(persisted.baselineBuildLogPath).toBe(stagedBaselineLogPath);
   }, SMOKE_TIMEOUT_MS);
 });
