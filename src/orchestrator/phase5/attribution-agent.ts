@@ -27,6 +27,7 @@ import {
   type AgentTool,
   tool,
 } from "@intx/agent";
+import type { Dependencies } from "@intx/inference";
 import { type } from "arktype";
 import type { ProviderConfig } from "@intx/types/runtime";
 
@@ -94,6 +95,11 @@ export interface CreateAttributionAgentOptions {
   readonly adapter: string;
   /** Optional system-prompt override. */
   readonly systemPrompt?: string;
+  /**
+   * Inference-layer Dependencies forwarded to `createAgent`; tests pass
+   * `setupHarness().deps`. Production callers omit.
+   */
+  readonly deps?: Dependencies;
 }
 
 export interface AttributionAgent {
@@ -124,6 +130,7 @@ export async function createAttributionAgent(
     defaultModel: options.model,
     systemPrompt: options.systemPrompt ?? ATTRIBUTION_SYSTEM_PROMPT,
     tools: surface.agentTools,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
   });
 
   return {

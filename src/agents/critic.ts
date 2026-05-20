@@ -23,6 +23,7 @@ import {
   type AgentTool,
   fromToolRunner,
 } from "@intx/agent";
+import type { Dependencies } from "@intx/inference";
 import {
   createPosixTools,
   type Middleware,
@@ -96,6 +97,11 @@ export interface CreateCriticAgentOptions {
   readonly adapter: string;
   /** Optional system-prompt override. */
   readonly systemPrompt?: string;
+  /**
+   * Inference-layer Dependencies forwarded to `createAgent`; tests pass
+   * `setupHarness().deps`. Production callers omit.
+   */
+  readonly deps?: Dependencies;
 }
 
 export interface CriticAgent {
@@ -128,6 +134,7 @@ export async function createCriticAgent(
     defaultModel: options.model,
     systemPrompt: options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     tools: surface.agentTools,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
   });
 
   return {

@@ -33,6 +33,7 @@ import {
   fromToolRunner,
   tool,
 } from "@intx/agent";
+import type { Dependencies } from "@intx/inference";
 
 import { toolInputSchema } from "../json-schema-fixup.js";
 import {
@@ -97,6 +98,11 @@ export interface PlannerAgentOptions {
   readonly systemPrompt?: string;
   /** Override the seed message. When omitted, built from spec + skill blob. */
   readonly seedMessage?: string;
+  /**
+   * Inference-layer Dependencies forwarded to `createAgent`; tests pass
+   * `setupHarness().deps`. Production callers omit.
+   */
+  readonly deps?: Dependencies;
 }
 
 export interface CreatePlannerAgentResult {
@@ -122,6 +128,7 @@ export async function createPlannerAgent(
     defaultModel: options.model,
     systemPrompt: options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     tools: tools.agentTools,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
   });
 
   return {
