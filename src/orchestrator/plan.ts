@@ -185,12 +185,48 @@ async function runPlannerAgent(args: RunPlannerArgs): Promise<FinalizedPlan> {
     seedMessage: args.seedMessage,
   });
 
+  // Drain the agent's event stream concurrently with `send` so any
+  // inference.error / tool.* event the reactor emits surfaces to the
+  // orchestrator's stderr — without this, a 4xx from the provider
+  // silently drops the reactor on the floor.
+  const drain = (async () => {
+    try {
+      for await (const event of agent.stream()) {
+        if (event.type === "inference.error") {
+          // eslint-disable-next-line no-console
+          console.error(
+            `[planner] inference.error: ${JSON.stringify(event.data?.error ?? event.data)}`,
+          );
+        }
+      }
+    } catch {
+      // The stream ends with an error when the agent closes; that is
+      // not a failure mode we need to surface from the drain itself.
+    }
+  })();
+
   try {
-    await agent.send(args.seedMessage);
-    const finalized = await awaitFinalizedPlan;
-    return finalized;
+    // Race agent.send (which drives the reactor; resolves when the
+    // reactor stops emitting events — including on inference errors)
+    // against awaitFinalizedPlan (which resolves only when the planner
+    // explicitly calls the terminal tool). If `send` finishes first
+    // the agent died before finalizing — surface that as a loud error
+    // instead of hanging on a Promise that will never resolve.
+    const sendDone = agent.send(args.seedMessage).then(() => "send-done" as const);
+    const finalize = awaitFinalizedPlan.then((value) => ({
+      kind: "finalize" as const,
+      value,
+    }));
+    const winner = await Promise.race([sendDone, finalize]);
+    if (winner === "send-done") {
+      throw new Error(
+        `planner agent closed without calling finalizePlan — most likely an inference-provider error. Inspect the agent context's turns.jsonl at ${args.contextDir} for diagnostics.`,
+      );
+    }
+    return winner.value;
   } finally {
     await agent.close();
+    await drain;
   }
 }
 

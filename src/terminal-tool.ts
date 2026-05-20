@@ -28,13 +28,25 @@
 import { tool, type AgentTool } from "@intx/agent";
 import { type, type Type } from "arktype";
 
+import { fixupJsonSchemaForStrictValidators } from "./json-schema-fixup.js";
+
 export interface TerminalTool<T> {
   readonly tool: AgentTool;
   awaitTermination(): Promise<T>;
 }
 
+const inputSchemaShape = type("Record<string, unknown>");
+
 function toInputSchema(schema: Type): Record<string, unknown> {
-  return { ...schema.toJsonSchema() };
+  const raw = { ...schema.toJsonSchema() };
+  const fixed = fixupJsonSchemaForStrictValidators(raw);
+  const validated = inputSchemaShape(fixed);
+  if (validated instanceof type.errors) {
+    throw new Error(
+      `terminalTool: fixupJsonSchemaForStrictValidators returned a non-object root: ${validated.summary}`,
+    );
+  }
+  return validated;
 }
 
 /**

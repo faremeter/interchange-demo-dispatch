@@ -24,7 +24,7 @@
 // underlying runner but are never advertised, so the model has no way to
 // invoke them.
 
-import { type } from "arktype";
+import { type, type Type } from "arktype";
 
 import {
   createAgent,
@@ -33,6 +33,23 @@ import {
   fromToolRunner,
   tool,
 } from "@intx/agent";
+
+import { fixupJsonSchemaForStrictValidators } from "../json-schema-fixup.js";
+
+const plannerInputSchemaShape = type("Record<string, unknown>");
+
+function toolInputSchema(schema: Type): Record<string, unknown> {
+  const fixed = fixupJsonSchemaForStrictValidators({
+    ...schema.toJsonSchema(),
+  });
+  const validated = plannerInputSchemaShape(fixed);
+  if (validated instanceof type.errors) {
+    throw new Error(
+      `planner: fixupJsonSchemaForStrictValidators returned a non-object root: ${validated.summary}`,
+    );
+  }
+  return validated;
+}
 import {
   createPosixTools,
   type Middleware,
@@ -202,7 +219,7 @@ function makePropose(
       name: "proposeTask",
       description:
         "Propose one task for the DAG. Repeatable. Returns the generated task id on success; returns isError on argument-validation or runtime-rejection (duplicate idHint, dangling dependency).",
-      inputSchema: { ...proposeTaskArgsSchema.toJsonSchema() },
+      inputSchema: toolInputSchema(proposeTaskArgsSchema),
     },
     handler: async (call) => {
       if (isFinalized()) {
@@ -261,7 +278,7 @@ function makeFinalize(
       name: "finalizePlan",
       description:
         "Terminal. Validates the accumulated DAG (acyclic, unique ids, levels consistent with deps) and finalizes the plan. Returns isError with validation issues on failure; the model should then propose corrections before retrying.",
-      inputSchema: { ...finalizePlanArgsSchema.toJsonSchema() },
+      inputSchema: toolInputSchema(finalizePlanArgsSchema),
     },
     handler: async (call) => {
       if (isFinalized()) {
