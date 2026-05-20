@@ -29,9 +29,10 @@
   },
   "dependencies": {
     "@intx/agent": "workspace:*",
-    "@intx/tools-posix": "workspace:*",
+    "@intx/inference": "workspace:*",
     "@intx/tools-lsp": "workspace:*",
-    "@intx/inference": "workspace:*"
+    "@intx/tools-posix": "workspace:*",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@eslint/js": "9.34.0",
