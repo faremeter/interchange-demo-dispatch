@@ -108,7 +108,8 @@ export interface CreateGateCriticAgentOptions {
    * Optional provider name. Defaults to "anthropic". Override when wiring
    * to a different upstream.
    */
-  readonly provider?: string;
+  /** Inference adapter (e.g. "openai", "anthropic"). Required. */
+  readonly adapter: string;
   /** Optional system-prompt override. */
   readonly systemPrompt?: string;
 }
@@ -133,7 +134,7 @@ export async function createGateCriticAgent(
   });
 
   const providerConfig: ProviderConfig = {
-    provider: options.provider ?? "anthropic",
+    provider: options.adapter,
     baseURL: options.baseURL,
     apiKey: options.apiKey,
     model: options.model,

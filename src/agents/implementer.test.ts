@@ -95,6 +95,7 @@ const PROVIDER = {
   baseURL: "https://example.invalid",
   apiKey: "test-key",
   model: "claude-test",
+    adapter: "anthropic",
 } as const;
 
 /**

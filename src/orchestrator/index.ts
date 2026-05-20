@@ -75,7 +75,14 @@ import type { GreybeardSpawner, OperatorResolver } from "./karen-loop.js";
 export interface ProviderCredentials {
   readonly baseURL: string;
   readonly apiKey: string;
-  readonly provider?: string;
+  /**
+   * Inference adapter that selects the HTTP API style — e.g.
+   * "openai" for OpenAI-compatible endpoints (including opencode-go)
+   * or "anthropic" for the Anthropic API. Threaded through to every
+   * spawned agent so the inference harness picks the matching
+   * adapter. Required: no sensible default exists across providers.
+   */
+  readonly adapter: string;
 }
 
 export interface RunDispatchOptions {
@@ -357,22 +364,20 @@ function buildPlanOptions(input: RunStageInput): PlanOptions {
       config: init.config,
       baseURL: "test://unused",
       apiKey: "test-unused",
+      adapter: "test-unused",
       contextDirRoot,
       plannerOverride: options.plannerOverride,
     };
   }
 
   const provider = requireProvider(options, "plan");
-  const base: PlanOptions = {
+  return {
     config: init.config,
     baseURL: provider.baseURL,
     apiKey: provider.apiKey,
+    adapter: provider.adapter,
     contextDirRoot,
   };
-  if (provider.provider !== undefined) {
-    return { ...base, provider: provider.provider };
-  }
-  return base;
 }
 
 interface LevelStageInput {
@@ -397,6 +402,7 @@ async function runOneLevel(input: LevelStageInput): Promise<Run> {
     model: init.config.modelConfig.implementer,
     baseURL: provider?.baseURL ?? "test://unused",
     apiKey: provider?.apiKey ?? "test-unused",
+    ...(provider?.adapter !== undefined ? { adapter: provider.adapter } : {}),
     ...(options.directorFactory !== undefined
       ? { directorFactory: options.directorFactory }
       : {}),

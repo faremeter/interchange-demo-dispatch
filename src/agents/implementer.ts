@@ -92,11 +92,11 @@ export interface CreateImplementerAgentOptions {
    */
   deps?: Dependencies;
   /**
-   * Optional provider name. Defaults to "anthropic" because the brief
-   * targets Claude as the primary model. Override when wiring to a
-   * different upstream.
+   * Inference adapter (e.g. "openai" for opencode-go's OpenAI-compatible
+   * endpoint, "anthropic" for the Anthropic API). Required: no sensible
+   * default exists across providers.
    */
-  provider?: string;
+  adapter: string;
 }
 
 export interface ImplementerAgent {
@@ -171,7 +171,7 @@ export async function createImplementerAgent(
   ];
 
   const providerConfig: ProviderConfig = {
-    provider: options.provider ?? "anthropic",
+    provider: options.adapter,
     baseURL: options.baseURL,
     apiKey: options.apiKey,
     model: options.model,

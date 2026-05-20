@@ -117,8 +117,8 @@ export interface CreateGreybeardAgentOptions {
    * callers leave this undefined.
    */
   deps?: Dependencies;
-  /** Provider name. Defaults to "anthropic". */
-  provider?: string;
+  /** Inference adapter (e.g. "openai", "anthropic"). Required. */
+  adapter: string;
 }
 
 export interface GreybeardAgent {
@@ -182,7 +182,7 @@ export async function createGreybeardAgent(
   const tools = buildGreybeardTools(options);
 
   const providerConfig: ProviderConfig = {
-    provider: options.provider ?? "anthropic",
+    provider: options.adapter,
     baseURL: options.baseURL,
     apiKey: options.apiKey,
     model: options.model,

@@ -47,7 +47,8 @@ export interface PlanOptions {
   readonly config: DispatchConfig;
   readonly baseURL: string;
   readonly apiKey: string;
-  readonly provider?: string;
+  /** Inference adapter (e.g. "openai", "anthropic"). Required. */
+  readonly adapter: string;
   /**
    * Where this run's per-task agent-context directories live. Each task
    * gets `<contextDirRoot>/<taskId>/agent-ctx/`; the planner itself runs
@@ -136,7 +137,7 @@ export async function plan(run: Run, options: PlanOptions): Promise<Run> {
       model: options.config.modelConfig.planner,
       baseURL: options.baseURL,
       apiKey: options.apiKey,
-      provider: options.provider,
+      adapter: options.adapter,
       seedMessage,
     });
   }
@@ -168,7 +169,7 @@ interface RunPlannerArgs {
   readonly model: string;
   readonly baseURL: string;
   readonly apiKey: string;
-  readonly provider: string | undefined;
+  readonly adapter: string;
   readonly seedMessage: string;
 }
 
@@ -181,7 +182,7 @@ async function runPlannerAgent(args: RunPlannerArgs): Promise<FinalizedPlan> {
     model: args.model,
     baseURL: args.baseURL,
     apiKey: args.apiKey,
-    ...(args.provider === undefined ? {} : { provider: args.provider }),
+    adapter: args.adapter,
     seedMessage: args.seedMessage,
   });
 

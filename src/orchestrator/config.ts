@@ -45,7 +45,7 @@ export type ModelConfig = typeof modelConfigSchema.infer;
  */
 export const providerConfigSchema = type({
   baseURL: "string",
-  "adapter?": "string",
+  adapter: "string",
 });
 
 export type ProviderConfig = typeof providerConfigSchema.infer;

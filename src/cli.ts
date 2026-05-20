@@ -63,14 +63,16 @@ async function loadProviderCredentialsFromEnv(
       `dispatch-config.yaml declared a provider.baseURL but ${OPENCODE_API_KEY_ENV} is unset; export the env var to authenticate against ${config.provider.baseURL}`,
     );
   }
-  const credentials: ProviderCredentials = {
+  if (config.provider.adapter === undefined) {
+    throw new Error(
+      `dispatch-config.yaml declared a provider.baseURL but provider.adapter is unset; set it to "openai" for opencode-go-style endpoints or "anthropic" for the Anthropic API`,
+    );
+  }
+  return {
     baseURL: config.provider.baseURL,
     apiKey,
-    ...(config.provider.adapter !== undefined
-      ? { provider: config.provider.adapter }
-      : {}),
+    adapter: config.provider.adapter,
   };
-  return credentials;
 }
 
 /* eslint-disable no-console */

@@ -118,6 +118,7 @@ function buildOptions(extra: {
     model: "claude-test",
     baseURL: "https://example.invalid",
     apiKey: "test-key",
+    adapter: "anthropic",
     ...(extra.greybeardSpawner !== undefined
       ? { greybeardSpawner: extra.greybeardSpawner }
       : {}),

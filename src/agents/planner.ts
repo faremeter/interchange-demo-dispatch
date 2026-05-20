@@ -92,7 +92,8 @@ export interface PlannerAgentOptions {
   readonly model: string;
   readonly baseURL: string;
   readonly apiKey: string;
-  readonly provider?: string;
+  /** Inference adapter (e.g. "openai", "anthropic"). Required. */
+  readonly adapter: string;
   readonly systemPrompt?: string;
   /** Override the seed message. When omitted, built from spec + skill blob. */
   readonly seedMessage?: string;
@@ -109,7 +110,7 @@ export async function createPlannerAgent(
   const tools = buildPlannerTools(options);
 
   const providerConfig: ProviderConfig = {
-    provider: options.provider ?? "openai",
+    provider: options.adapter,
     baseURL: options.baseURL,
     apiKey: options.apiKey,
     model: options.model,

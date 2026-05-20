@@ -144,6 +144,8 @@ export interface RunKarenLoopForTaskOptions {
   baseURL: string;
   /** Provider API key (greybeard agent). */
   apiKey: string;
+  /** Inference adapter (e.g. "openai", "anthropic"). Required. */
+  adapter: string;
   /**
    * Optional scripted director passed through to the greybeard agent for
    * tests. Production callers leave undefined.
@@ -284,6 +286,7 @@ async function consultGreybeardAndProcess(args: {
     model: options.model,
     baseURL: options.baseURL,
     apiKey: options.apiKey,
+    adapter: options.adapter,
     ...(options.greybeardDirector !== undefined
       ? { director: options.greybeardDirector }
       : {}),
