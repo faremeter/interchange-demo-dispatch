@@ -41,6 +41,7 @@ import {
 } from "@intx/tools-posix";
 import type { ProviderConfig, ToolDefinition, ToolResult } from "@intx/types/runtime";
 
+import { toolInputSchema } from "../json-schema-fixup.js";
 import { createPathEscapeMiddleware } from "../path-escape.js";
 import { terminalTool } from "../terminal-tool.js";
 import {
@@ -247,7 +248,7 @@ function buildGitShowTool(opts: {
       name: "gitShow",
       description:
         "Read-only. Returns the output of `git show <sha>` against the run's target repository. `sha` MUST be one of the commit SHAs the orchestrator assigned to a task in this level; any other value is rejected without invoking git.",
-      inputSchema: { ...gitShowArgsSchema.toJsonSchema() },
+      inputSchema: toolInputSchema(gitShowArgsSchema),
     },
     handler: async (call) => {
       const parsed = gitShowArgsSchema(call.arguments);

@@ -30,6 +30,7 @@ import {
 import { type } from "arktype";
 import type { ProviderConfig } from "@intx/types/runtime";
 
+import { toolInputSchema } from "../../json-schema-fixup.js";
 import { terminalTool } from "../../terminal-tool.js";
 
 const ATTRIBUTION_SYSTEM_PROMPT = [
@@ -172,7 +173,7 @@ function buildRecordTool(sink: Map<string, string[]>): AgentTool {
       name: "recordAttribution",
       description:
         "Map a single new build failure to one or more responsible tasks. Required fields: failureId (string, must match an id from the input list); taskIds (string[], non-empty). Call once per failure; the orchestrator dedupes repeated taskIds within a call.",
-      inputSchema: { ...recordAttributionArgsSchema.toJsonSchema() },
+      inputSchema: toolInputSchema(recordAttributionArgsSchema),
     },
     handler: async (call) => {
       const parsed = recordAttributionArgsSchema(call.arguments);

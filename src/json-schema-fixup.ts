@@ -10,11 +10,30 @@
 // Every node access goes through an arktype schema so the traversal is
 // typed end-to-end, not just `unknown` casts.
 
-import { type } from "arktype";
+import { type, type Type } from "arktype";
 
 const objectNode = type("Record<string, unknown>");
 const stringArrayValue = type("string[]");
 const arrayOfUnknown = type("unknown[]");
+
+/**
+ * Convert an arktype `Type` into the JSON-Schema-shaped `inputSchema`
+ * an `@intx/agent` `AgentTool` carries, with the strict-validator
+ * fixup applied. Every site that wires an arktype schema into a tool
+ * definition should go through here so Moonshot-flavored providers
+ * accept the resulting tool surface.
+ */
+export function toolInputSchema(schema: Type): Record<string, unknown> {
+  const raw = { ...schema.toJsonSchema() };
+  const fixed = fixupJsonSchemaForStrictValidators(raw);
+  const validated = objectNode(fixed);
+  if (validated instanceof type.errors) {
+    throw new Error(
+      `toolInputSchema: fixupJsonSchemaForStrictValidators returned a non-object root: ${validated.summary}`,
+    );
+  }
+  return validated;
+}
 
 /**
  * Walk a JSON-Schema document and stamp `type: "string"` onto any

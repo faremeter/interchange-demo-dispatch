@@ -24,7 +24,7 @@
 // underlying runner but are never advertised, so the model has no way to
 // invoke them.
 
-import { type, type Type } from "arktype";
+import { type } from "arktype";
 
 import {
   createAgent,
@@ -34,22 +34,7 @@ import {
   tool,
 } from "@intx/agent";
 
-import { fixupJsonSchemaForStrictValidators } from "../json-schema-fixup.js";
-
-const plannerInputSchemaShape = type("Record<string, unknown>");
-
-function toolInputSchema(schema: Type): Record<string, unknown> {
-  const fixed = fixupJsonSchemaForStrictValidators({
-    ...schema.toJsonSchema(),
-  });
-  const validated = plannerInputSchemaShape(fixed);
-  if (validated instanceof type.errors) {
-    throw new Error(
-      `planner: fixupJsonSchemaForStrictValidators returned a non-object root: ${validated.summary}`,
-    );
-  }
-  return validated;
-}
+import { toolInputSchema } from "../json-schema-fixup.js";
 import {
   createPosixTools,
   type Middleware,

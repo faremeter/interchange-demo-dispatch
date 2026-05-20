@@ -44,6 +44,7 @@ import { type } from "arktype";
 import type { Dependencies } from "@intx/inference";
 import type { ProviderConfig, ReactorDirector } from "@intx/types/runtime";
 
+import { toolInputSchema } from "../json-schema-fixup.js";
 import { createPathEscapeMiddleware } from "../path-escape.js";
 import { terminalTool } from "../terminal-tool.js";
 import {
@@ -122,7 +123,7 @@ function buildRecordBuildResultTool(sink: RecordedBuild[]): AgentTool {
       name: "recordBuildResult",
       description:
         "Record evidence for a build/lint/test command the implementer ran. Callable any number of times; each invocation appends to the orchestrator-visible recordedBuilds list. Required fields: command (string), exitCode (number), stdoutTail (string — last N lines of stdout/stderr).",
-      inputSchema: { ...recordedBuildSchema.toJsonSchema() },
+      inputSchema: toolInputSchema(recordedBuildSchema),
     },
     handler: async (call) => {
       const parsed = recordedBuildSchema(call.arguments);
