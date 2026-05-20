@@ -1,0 +1,6 @@
+status: completed
+summary: implemented greet(name)
+filesModified:
+  - src/greet.ts
+deviations: []
+notes: ""
