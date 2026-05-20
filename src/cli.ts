@@ -238,9 +238,12 @@ function validateScriptsBag(bag: object): void {
       typeof provider !== "object" ||
       provider === null ||
       typeof Reflect.get(provider, "baseURL") !== "string" ||
-      typeof Reflect.get(provider, "apiKey") !== "string"
+      typeof Reflect.get(provider, "apiKey") !== "string" ||
+      typeof Reflect.get(provider, "adapter") !== "string"
     ) {
-      throw new Error(`--scripts module export "provider" must be { baseURL, apiKey }`);
+      throw new Error(
+        `--scripts module export "provider" must be { baseURL, apiKey, adapter }`,
+      );
     }
   }
   const verifyMaxLoops: unknown = Reflect.get(bag, "verifyMaxLoops");

@@ -184,6 +184,8 @@ export const buildGateRunner = async ({ run }) => {
   return { output, exitCode: 0 };
 };
 export const taskVerifier = async () => ({ ok: true, output: "" });
+
+export const provider = { baseURL: "https://test.invalid", apiKey: "test-key", adapter: "anthropic" };
 `;
 
 describe("interchange-demo-dispatch CLI", () => {
