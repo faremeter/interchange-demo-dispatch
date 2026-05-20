@@ -43,6 +43,7 @@ import type { Run } from "../state/index.js";
 
 import { initRun, type InitRunResult, type SpecRef } from "./init.js";
 import { plan, type PlanOptions, type PlannerOverrideArgs } from "./plan.js";
+import { loadDispatchConfig } from "./config.js";
 import {
   runLevel,
   type DirectorFactory,
@@ -165,12 +166,50 @@ export async function runDispatch(
     const resumed = await resume(runDir);
     if (resumed.status === "done") return resumed;
     if (resumed.status === "failed") return resumed;
-    throw new Error(
-      `runDispatch: run-state.yaml at ${runStatePath} exists with status "${resumed.status}"; resume support is not wired (waiting on 7b-resume)`,
-    );
+
+    // The resume hook has already normalized any inconsistent on-disk
+    // state (stale agent-ctx, orphan logs, missing boundaries). What
+    // remains is routing the normalized run back into the appropriate
+    // stage of the forward path.
+    return continueAfterResume({
+      resumed,
+      spec,
+      runDir,
+      runStatePath,
+      targetRepoPath,
+      options,
+    });
   }
 
   const init = await initRun(spec);
+  return continueAfterInit({
+    init,
+    runDir,
+    runStatePath,
+    targetRepoPath,
+    options,
+    specName: spec.runName,
+  });
+}
+
+interface ContinueAfterInitArgs {
+  readonly init: InitRunResult;
+  readonly runDir: string;
+  readonly runStatePath: string;
+  readonly targetRepoPath: string;
+  readonly options: RunDispatchOptions;
+  readonly specName: string;
+}
+
+/**
+ * The portion of `runDispatch` after `initRun` has produced a fresh
+ * `InitRunResult`. Extracted so the resume path can synthesize an
+ * `InitRunResult` from a persisted Run and call here instead of
+ * re-running `initRun` (which would fail because the dispatch
+ * directory and integration branch already exist).
+ */
+async function continueAfterInit(args: ContinueAfterInitArgs): Promise<Run> {
+  const { init, runDir, runStatePath, targetRepoPath, options, specName } = args;
 
   const planned = await runPlanStage({
     init,
@@ -179,10 +218,34 @@ export async function runDispatch(
     options,
   });
 
+  return continueAfterPlan({
+    planned,
+    init,
+    runDir,
+    runStatePath,
+    targetRepoPath,
+    options,
+    specName,
+  });
+}
+
+interface ContinueAfterPlanArgs {
+  readonly planned: Run;
+  readonly init: InitRunResult;
+  readonly runDir: string;
+  readonly runStatePath: string;
+  readonly targetRepoPath: string;
+  readonly options: RunDispatchOptions;
+  readonly specName: string;
+}
+
+async function continueAfterPlan(args: ContinueAfterPlanArgs): Promise<Run> {
+  const { planned, init, runDir, runStatePath, targetRepoPath, options, specName } = args;
+
   const levels = levelsOf(planned);
   if (levels.length === 0) {
     throw new Error(
-      `runDispatch: planner produced no tasks for run "${spec.runName}"`,
+      `runDispatch: planner produced no tasks for run "${specName}"`,
     );
   }
 
@@ -220,6 +283,50 @@ export async function runDispatch(
   await writeRun(runStatePath, working);
   working = await finalizeReport(working, runDir, runStatePath, options.now);
   return working;
+}
+
+interface ContinueAfterResumeArgs {
+  readonly resumed: Run;
+  readonly spec: SpecRef;
+  readonly runDir: string;
+  readonly runStatePath: string;
+  readonly targetRepoPath: string;
+  readonly options: RunDispatchOptions;
+}
+
+/**
+ * Route a resumed run into the appropriate forward-path stage based on
+ * its persisted status. Terminal statuses (`done`, `failed`) are
+ * handled by the caller before reaching here. For non-terminal
+ * statuses, the resume hook is assumed to have normalized any
+ * inconsistent on-disk state.
+ *
+ * - `planning` / `gating-plan`: `initRun` already ran; reconstruct a
+ *   synthetic `InitRunResult` from the persisted run + reloaded
+ *   config and re-enter at the plan stage.
+ * - `executing` / `verifying` / `fixing-verification` / `consolidating`:
+ *   not yet implemented in the PoC. Throws with a clear message and
+ *   the workaround (manual cleanup).
+ */
+async function continueAfterResume(args: ContinueAfterResumeArgs): Promise<Run> {
+  const { resumed, spec, runDir, runStatePath, targetRepoPath, options } = args;
+
+  if (resumed.status === "planning" || resumed.status === "gating-plan") {
+    const config = await loadDispatchConfig(spec.dispatchConfigPath);
+    const init: InitRunResult = { run: resumed, config, runStatePath };
+    return continueAfterInit({
+      init,
+      runDir,
+      runStatePath,
+      targetRepoPath,
+      options,
+      specName: spec.runName,
+    });
+  }
+
+  throw new Error(
+    `runDispatch: resume from status "${resumed.status}" is not yet implemented (PoC scope). Workaround: \`rm -rf ${runDir}\` and \`git branch -D ${resumed.integrationBranch}\` in ${targetRepoPath}, then re-run.`,
+  );
 }
 
 const defaultResume: NonNullable<RunDispatchOptions["resume"]> = async (
