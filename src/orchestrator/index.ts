@@ -392,7 +392,7 @@ interface LevelStageInput {
 
 async function runOneLevel(input: LevelStageInput): Promise<Run> {
   const { run, level, init, runDir, runStatePath, targetRepoPath, options } = input;
-  const provider = options.provider;
+  const provider = requireProvider(options, "level");
   const runLevelOptions: RunLevelOptions = {
     run,
     level,
@@ -400,9 +400,9 @@ async function runOneLevel(input: LevelStageInput): Promise<Run> {
     runDir,
     runStatePath,
     model: init.config.modelConfig.implementer,
-    baseURL: provider?.baseURL ?? "test://unused",
-    apiKey: provider?.apiKey ?? "test-unused",
-    ...(provider?.adapter !== undefined ? { adapter: provider.adapter } : {}),
+    baseURL: provider.baseURL,
+    apiKey: provider.apiKey,
+    adapter: provider.adapter,
     ...(options.directorFactory !== undefined
       ? { directorFactory: options.directorFactory }
       : {}),

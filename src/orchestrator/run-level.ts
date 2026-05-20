@@ -83,11 +83,9 @@ export interface ImplementerSpawnInput {
    * OpenAI-compatible endpoint, "anthropic" for Anthropic's API).
    * Forwarded to `createImplementerAgent` so the underlying
    * `ProviderConfig.provider` reaches the inference harness.
-   * Optional in the type only because test seams supply a director
-   * and never reach the inference layer; production callers must
-   * thread it through.
+   * Required.
    */
-  adapter?: string;
+  readonly adapter: string;
   director?: ReactorDirector;
 }
 
@@ -147,11 +145,9 @@ export interface RunLevelOptions {
   apiKey: string;
   /**
    * Inference adapter name forwarded to every agent spawned within
-   * this level (implementer + greybeard). Optional only because
-   * tests wire scripted directors that bypass the inference layer;
-   * production callers must thread it through.
+   * this level (implementer + greybeard). Required.
    */
-  adapter?: string;
+  adapter: string;
   /**
    * Maximum parallel implementer agents. Defaults to the number of tasks in
    * the level (no cap). The orchestrator typically reads this from
@@ -362,7 +358,7 @@ async function dispatchOneTask(args: {
     model: options.model,
     baseURL: options.baseURL,
     apiKey: options.apiKey,
-    ...(options.adapter !== undefined ? { adapter: options.adapter } : {}),
+    adapter: options.adapter,
     ...(director !== undefined ? { director } : {}),
   };
   const handle = await spawner(spawnInput);
@@ -432,7 +428,7 @@ async function dispatchOneTask(args: {
     model: options.model,
     baseURL: options.baseURL,
     apiKey: options.apiKey,
-    adapter: options.adapter ?? "anthropic",
+    adapter: options.adapter,
     ...(greybeardDirector !== undefined
       ? { greybeardDirector }
       : {}),
@@ -553,11 +549,6 @@ async function runWithConcurrency<T, R>(
 }
 
 const defaultImplementerSpawner: ImplementerSpawner = async (input) => {
-  if (input.adapter === undefined) {
-    throw new Error(
-      "defaultImplementerSpawner: adapter is required (e.g. \"openai\" for opencode-go-style endpoints). Wire it through RunLevelOptions.adapter.",
-    );
-  }
   const spawnOptions: CreateImplementerAgentOptions = {
     worktreePath: input.worktreePath,
     contextDir: input.contextDir,

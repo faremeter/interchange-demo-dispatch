@@ -181,6 +181,7 @@ const PROVIDER = {
   model: "claude-test",
   baseURL: "https://example.invalid",
   apiKey: "test-key",
+    adapter: "anthropic",
 } as const;
 
 let harness: Harness;

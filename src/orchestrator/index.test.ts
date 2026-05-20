@@ -298,6 +298,7 @@ describe("runDispatch", () => {
     // baseline capture wrote (which is what the real PASS_BUILD
     // output matches).
     const finalRun = await runDispatch(spec, {
+      provider: { baseURL: "https://test.invalid", apiKey: "test-key", adapter: "anthropic" },
       plannerOverride: async () => buildTwoTaskPlan(),
       directorFactory: ({ task }) => {
         const map: Record<string, ScriptStep[]> = {
@@ -368,6 +369,7 @@ describe("runDispatch", () => {
     };
 
     const finalRun = await runDispatch(spec, {
+      provider: { baseURL: "https://test.invalid", apiKey: "test-key", adapter: "anthropic" },
       plannerOverride: async () => buildSingleTaskPlan(),
       directorFactory: () =>
         scriptedDirector(implementerScriptFor("alpha.txt", "alpha-body\n")),
@@ -410,6 +412,7 @@ describe("runDispatch", () => {
       dispatchConfigPath: join(workDir, "dispatch-config.yaml"),
     };
     await runDispatch(spec, {
+      provider: { baseURL: "https://test.invalid", apiKey: "test-key", adapter: "anthropic" },
       plannerOverride: async () => buildSingleTaskPlan(),
       directorFactory: () =>
         scriptedDirector(implementerScriptFor("alpha.txt", "alpha-body\n")),
