@@ -1,0 +1,22 @@
+status: completed
+files-modified:
+  - src/greet.ts
+  - package.json
+verification-summary:
+  level: automated
+  evidence-files:
+    - verification.log
+  result: "bun test: 1 pass"
+deviations:
+  - id: dev-1
+    severity: moderate
+    category: scope
+    description: |
+      Added a new dev dependency (`canonical-json`) for stable string
+      serialization, even though the plan's Constraints section forbids
+      new third-party dependencies.
+    affectedFiles:
+      - package.json
+notes: |
+  Sample fixture used by greybeard.test.ts. The deviation is exactly the
+  one the test feeds into the greybeard.
