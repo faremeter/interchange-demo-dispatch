@@ -90,7 +90,26 @@ export async function plan(run: Run, options: PlanOptions): Promise<Run> {
   const taskDirRoot = options.taskDirRoot ?? runDirDefault;
   const runStatePath = options.runStatePath ?? join(runDirDefault, "run-state.yaml");
 
-  const skillBlob = await loadSkillFiles(targetRepoPath);
+  // The skill loader is strict about a missing `skills/` directory so
+  // a misconfigured interchange-like target fails loudly. Plain demo
+  // targets won't have skills at all; in that case we degrade
+  // gracefully to an empty blob (the planner just gets less context).
+  let skillBlob: Awaited<ReturnType<typeof loadSkillFiles>>;
+  try {
+    skillBlob = await loadSkillFiles(targetRepoPath);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Required skills directory not found")) {
+      skillBlob = {
+        blob: "",
+        files: [],
+        totalBytes: 0,
+        missingOptional: [],
+      };
+    } else {
+      throw err;
+    }
+  }
   const specAbsolute = resolve(run.specPath);
   const specText = await readFile(specAbsolute, "utf8");
 
