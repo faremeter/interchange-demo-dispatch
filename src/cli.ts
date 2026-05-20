@@ -31,11 +31,47 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { runDispatch, type RunDispatchOptions } from "./orchestrator/index.js";
+import {
+  runDispatch,
+  type ProviderCredentials,
+  type RunDispatchOptions,
+} from "./orchestrator/index.js";
 import type { SpecRef } from "./orchestrator/index.js";
+import { loadDispatchConfig } from "./orchestrator/config.js";
 import { resume } from "./orchestrator/resume.js";
 import { tearDownLevelWorktree } from "./orchestrator/worktree.js";
 import { loadRun } from "./state/index.js";
+
+const OPENCODE_API_KEY_ENV = "OPENCODE_API_KEY";
+
+/**
+ * Build production-mode provider credentials from `dispatch-config.yaml`
+ * + the `OPENCODE_API_KEY` env var. Returns `null` when the config does
+ * not declare a `provider` block at all (the caller may be running in
+ * `--scripts` mode where the scripted overrides never reach the model);
+ * throws loudly when the block IS declared but the API key env var is
+ * missing — that combination is unambiguously a misconfiguration.
+ */
+async function loadProviderCredentialsFromEnv(
+  dispatchConfigPath: string,
+): Promise<ProviderCredentials | null> {
+  const config = await loadDispatchConfig(dispatchConfigPath);
+  if (config.provider === undefined) return null;
+  const apiKey = process.env[OPENCODE_API_KEY_ENV];
+  if (apiKey === undefined || apiKey.length === 0) {
+    throw new Error(
+      `dispatch-config.yaml declared a provider.baseURL but ${OPENCODE_API_KEY_ENV} is unset; export the env var to authenticate against ${config.provider.baseURL}`,
+    );
+  }
+  const credentials: ProviderCredentials = {
+    baseURL: config.provider.baseURL,
+    apiKey,
+    ...(config.provider.adapter !== undefined
+      ? { provider: config.provider.adapter }
+      : {}),
+  };
+  return credentials;
+}
 
 /* eslint-disable no-console */
 async function main(argv: readonly string[]): Promise<number> {
@@ -87,7 +123,15 @@ async function runDispatchVerb(argv: readonly string[]): Promise<number> {
   // Wire 7b's resume as the default options.resume so the CLI picks up
   // any previously-persisted run state. `--scripts` callers can override
   // by exporting their own `resume` from the scripts module.
-  const baseOptions: RunDispatchOptions = { resume };
+  // Build production provider credentials from dispatch-config.yaml +
+  // OPENCODE_API_KEY env var. Skipped silently if the config has no
+  // provider block (then `--scripts` is expected to supply runners that
+  // never reach the model).
+  const credentials = await loadProviderCredentialsFromEnv(dispatchConfigPath);
+  const baseOptions: RunDispatchOptions = {
+    resume,
+    ...(credentials !== null ? { provider: credentials } : {}),
+  };
   const overrides =
     scriptsPath === null ? {} : await loadScripts(scriptsPath);
   const options: RunDispatchOptions = { ...baseOptions, ...overrides };

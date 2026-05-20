@@ -31,9 +31,29 @@ export const modelConfigSchema = type({
 
 export type ModelConfig = typeof modelConfigSchema.infer;
 
+/**
+ * Provider connection settings. Per the spec, the base URL belongs in
+ * the config file (so the operator can switch endpoints per target
+ * repo) while the API key comes from the `OPENCODE_API_KEY` env var.
+ * The optional `adapter` field is forwarded to the inference call as
+ * the `provider` hint (typically `openai` for opencode-go's
+ * OpenAI-compatible endpoint).
+ *
+ * Optional in the schema so that test-only runs driven through
+ * `--scripts` (which inject their own canned runners) do not have to
+ * carry it.
+ */
+export const providerConfigSchema = type({
+  baseURL: "string",
+  "adapter?": "string",
+});
+
+export type ProviderConfig = typeof providerConfigSchema.infer;
+
 export const dispatchConfigSchema = type({
   buildGate: "string[]",
   modelConfig: modelConfigSchema,
+  "provider?": providerConfigSchema,
 });
 
 export type DispatchConfig = typeof dispatchConfigSchema.infer;
