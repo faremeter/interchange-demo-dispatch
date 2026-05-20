@@ -26,12 +26,14 @@
 // recovery implementation by extending the same `Run`-shaped
 // contract.
 //
-// Test seams: every external collaborator (planner, implementer
-// directors, critic, gate critic, fix agent, attribution agent, build
-// gate, per-task verifier, operator resolver, greybeard) is
-// injectable. The CLI omits every override and the orchestrator wires
-// the production factories; tests pass scripted runners to exercise
-// the forward path without HTTP.
+// Test seams: the inference-layer collaborators (planner, implementer
+// directors, critic, gate critic, fix agent, attribution agent,
+// greybeard) are intercepted by passing `deps` from
+// `@intx/inference-testing` so model calls go through the deterministic
+// harness instead of HTTP. The shell-execution boundaries
+// (`buildGateRunner`, `taskVerifier`) and the operator file-watch
+// (`operatorResolver`) remain overridable for operators who need to
+// retarget them.
 
 import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
@@ -49,14 +51,10 @@ import { loadRun, writeRun } from "../state/index.js";
 import type { Finding, Run, Task } from "../state/index.js";
 
 import { initRun, type InitRunResult, type SpecRef } from "./init.js";
-import { plan, type PlanOptions, type PlannerOverrideArgs } from "./plan.js";
+import { plan, type PlanOptions } from "./plan.js";
 import { loadDispatchConfig } from "./config.js";
 import { buildFixAgentSeed } from "./fix-agent.js";
-import {
-  runLevel,
-  type DirectorFactory,
-  type RunLevelOptions,
-} from "./run-level.js";
+import { runLevel, type RunLevelOptions } from "./run-level.js";
 import { commitLevel } from "./commit-level.js";
 import {
   gate,
@@ -84,7 +82,7 @@ import {
 import { awaitOperatorResolution } from "./operator-escalation.js";
 import { levelsOf } from "./level-iterator.js";
 import { writeFinalReport } from "./final-report.js";
-import type { GreybeardSpawner, OperatorResolver } from "./karen-loop.js";
+import type { OperatorResolver } from "./karen-loop.js";
 
 export interface ProviderCredentials {
   readonly baseURL: string;
@@ -112,9 +110,8 @@ export type { Dependencies };
 
 export interface RunDispatchOptions {
   /**
-   * Provider credentials for any real-agent invocations. Required when
-   * production overrides are not supplied; tests may omit it because
-   * the scripted overrides never reach the model.
+   * Provider credentials for any real-agent invocations. Required for
+   * every stage that spawns an agent.
    */
   readonly provider?: ProviderCredentials;
   /**
@@ -136,36 +133,27 @@ export interface RunDispatchOptions {
    */
   readonly deps?: Dependencies;
   /**
-   * Scripted planner override forwarded to `plan(...)`. When set,
-   * `plan` never spawns the planner agent.
-   */
-  readonly plannerOverride?: (args: PlannerOverrideArgs) => ReturnType<NonNullable<PlanOptions["plannerOverride"]>>;
-  /** Scripted implementer director factory forwarded to `runLevel(...)`. */
-  readonly directorFactory?: DirectorFactory;
-  /** Scripted greybeard director factory forwarded to `runLevel(...)`. */
-  readonly greybeardDirectorFactory?: DirectorFactory;
-  /** Scripted greybeard spawner forwarded to `runLevel(...)`. */
-  readonly greybeardSpawner?: GreybeardSpawner;
-  /**
-   * Operator resolver used both by `runLevel` (file-watch escape
-   * hatch via Karen) and by the gate / verify pipelines.
+   * Operator resolver: the file-watch escape hatch used both by
+   * `runLevel` (via Karen) and by the gate / verify pipelines.
    * Production callers leave this unset and the orchestrator wires
    * `awaitOperatorResolution` against `<runDir>`.
    */
   readonly operatorResolver?: OperatorResolver;
-  /** Scripted critic runner used by `gate(...)`. */
-  readonly criticRunner?: CriticRunner;
-  /** Scripted gate-critic runner used by `gate(...)`. */
-  readonly gateCriticRunner?: GateCriticRunner;
-  /** Scripted amendment-loop fix agent runner used by `gate(...)`. */
-  readonly fixAgentRunner?: FixAgentRunner;
-  /** Scripted Phase-5 fix agent runner used by `verifyAgainstBaseline(...)`. */
-  readonly phase5FixAgentRunner?: Phase5FixAgentRunner;
-  /** Scripted attribution agent runner used by `verifyAgainstBaseline(...)`. */
-  readonly attributionRunner?: AttributionAgentRunner;
-  /** Scripted build-gate runner used by `verifyAgainstBaseline(...)`. */
+  /**
+   * Shell-level test seam: a `BuildGateRunner` invoked by
+   * `verifyAgainstBaseline(...)` to execute the configured build
+   * gate. Defaults to a runner that shells out via the project's
+   * dispatch-config; operators may override (e.g., to point at a
+   * non-default cwd) without touching the inference layer.
+   */
   readonly buildGateRunner?: BuildGateRunner;
-  /** Scripted per-task verifier used by `verifyAgainstBaseline(...)`. */
+  /**
+   * Shell-level test seam: a `TaskVerifier` invoked by
+   * `verifyAgainstBaseline(...)` to run per-task verification
+   * commands. Defaults to a runner driven by the dispatch-config's
+   * build-gate definition; same override rationale as
+   * `buildGateRunner`.
+   */
   readonly taskVerifier?: TaskVerifier;
   /**
    * Optional cap on Phase-5 outer fix-loop iterations. Forwarded
@@ -394,18 +382,6 @@ async function runPlanStage(input: RunStageInput): Promise<Run> {
 function buildPlanOptions(input: RunStageInput): PlanOptions {
   const { init, runDir, options } = input;
   const contextDirRoot = join(runDir, "agent-contexts");
-
-  if (options.plannerOverride !== undefined) {
-    return {
-      config: init.config,
-      baseURL: "test://unused",
-      apiKey: "test-unused",
-      adapter: "test-unused",
-      contextDirRoot,
-      plannerOverride: options.plannerOverride,
-    };
-  }
-
   const provider = requireProvider(options, "plan");
   return {
     config: init.config,
@@ -440,15 +416,6 @@ async function runOneLevel(input: LevelStageInput): Promise<Run> {
     baseURL: provider.baseURL,
     apiKey: provider.apiKey,
     adapter: provider.adapter,
-    ...(options.directorFactory !== undefined
-      ? { directorFactory: options.directorFactory }
-      : {}),
-    ...(options.greybeardDirectorFactory !== undefined
-      ? { greybeardDirectorFactory: options.greybeardDirectorFactory }
-      : {}),
-    ...(options.greybeardSpawner !== undefined
-      ? { greybeardSpawner: options.greybeardSpawner }
-      : {}),
     ...(options.operatorResolver !== undefined
       ? { operatorResolver: options.operatorResolver }
       : {}),
@@ -495,12 +462,9 @@ function buildGateOptions(input: GateOptionsInput): {
   awaitOperatorResolution: OperatorResolutionCallback;
   notify?: (message: string) => void;
 } {
-  const criticRunner =
-    input.options.criticRunner ?? buildDefaultCriticRunner(input);
-  const gateCriticRunner =
-    input.options.gateCriticRunner ?? buildDefaultGateCriticRunner(input);
-  const fixAgentRunner =
-    input.options.fixAgentRunner ?? buildDefaultFixAgentRunner(input);
+  const criticRunner = buildDefaultCriticRunner(input);
+  const gateCriticRunner = buildDefaultGateCriticRunner(input);
+  const fixAgentRunner = buildDefaultFixAgentRunner(input);
 
   const rebuildLevel: RebuildCallback = async (run, fromLevel) => {
     let next = run;
@@ -811,22 +775,18 @@ async function runVerification(input: VerificationStageInput): Promise<Run> {
   const taskVerifier =
     options.taskVerifier ??
     createDefaultTaskVerifier({ buildGate: init.config.buildGate });
-  const attributionRunner =
-    options.attributionRunner ??
-    buildDefaultAttributionRunner({
-      init,
-      runDir,
-      targetRepoPath,
-      options,
-    });
-  const phase5FixAgentRunner =
-    options.phase5FixAgentRunner ??
-    buildDefaultPhase5FixAgentRunner({
-      init,
-      runDir,
-      targetRepoPath,
-      options,
-    });
+  const attributionRunner = buildDefaultAttributionRunner({
+    init,
+    runDir,
+    targetRepoPath,
+    options,
+  });
+  const phase5FixAgentRunner = buildDefaultPhase5FixAgentRunner({
+    init,
+    runDir,
+    targetRepoPath,
+    options,
+  });
 
   // Phase 5's attribution agent receives diffs via the orchestrator-rendered
   // seed string. Build the per-task diff map from `git show <commitSHA>` so
