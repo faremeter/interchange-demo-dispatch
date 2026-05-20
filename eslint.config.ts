@@ -8,7 +8,7 @@ export default defineConfig(
   eslint.configs.recommended,
   tseslint.configs.strict,
   tseslint.configs.stylistic,
-  globalIgnores(["**/dist/**", "tmp/**"]),
+  globalIgnores(["**/dist/**", "tmp/**", "examples/fixtures/**"]),
   {
     linterOptions: {
       reportUnusedDisableDirectives: "warn",
@@ -46,7 +46,7 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["eslint.config.ts"],
+          allowDefaultProject: ["eslint.config.ts", "examples/*.ts"],
           maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 25,
         },
         tsconfigRootDir: import.meta.dirname,
