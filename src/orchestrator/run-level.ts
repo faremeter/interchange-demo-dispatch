@@ -40,7 +40,7 @@ import { join } from "node:path";
 import { stringify as stringifyYAML } from "yaml";
 
 import { AgentClosedError } from "@intx/agent";
-import type { ReactorEmittedEvent } from "@intx/inference";
+import type { Dependencies, ReactorEmittedEvent } from "@intx/inference";
 import type { ReactorDirector } from "@intx/types/runtime";
 
 import { writeRun } from "../state/persist.js";
@@ -86,6 +86,13 @@ export interface ImplementerSpawnInput {
    * Required.
    */
   readonly adapter: string;
+  /**
+   * Inference-layer `Dependencies` (fetch stub, clock, etc.) forwarded
+   * to the implementer agent factory. Production callers leave this
+   * undefined; tests pass `setupHarness().deps` from
+   * `@intx/inference-testing` to intercept model calls.
+   */
+  readonly deps?: Dependencies;
   director?: ReactorDirector;
 }
 
@@ -148,6 +155,13 @@ export interface RunLevelOptions {
    * this level (implementer + greybeard). Required.
    */
   adapter: string;
+  /**
+   * Inference-layer `Dependencies` forwarded to every agent spawned
+   * within this level (implementer + greybeard). Production callers
+   * leave this undefined; tests thread the deterministic harness
+   * `deps` through so model calls are intercepted.
+   */
+  readonly deps?: Dependencies;
   /**
    * Maximum parallel implementer agents. Defaults to the number of tasks in
    * the level (no cap). The orchestrator typically reads this from
@@ -359,6 +373,7 @@ async function dispatchOneTask(args: {
     baseURL: options.baseURL,
     apiKey: options.apiKey,
     adapter: options.adapter,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
     ...(director !== undefined ? { director } : {}),
   };
   const handle = await spawner(spawnInput);
@@ -429,6 +444,7 @@ async function dispatchOneTask(args: {
     baseURL: options.baseURL,
     apiKey: options.apiKey,
     adapter: options.adapter,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
     ...(greybeardDirector !== undefined
       ? { greybeardDirector }
       : {}),
@@ -556,6 +572,7 @@ const defaultImplementerSpawner: ImplementerSpawner = async (input) => {
     baseURL: input.baseURL,
     apiKey: input.apiKey,
     adapter: input.adapter,
+    ...(input.deps !== undefined ? { deps: input.deps } : {}),
     ...(input.director !== undefined ? { director: input.director } : {}),
   };
   const impl = await createImplementerAgent(spawnOptions);

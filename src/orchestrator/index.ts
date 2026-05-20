@@ -416,6 +416,7 @@ async function runOneLevel(input: LevelStageInput): Promise<Run> {
     baseURL: provider.baseURL,
     apiKey: provider.apiKey,
     adapter: provider.adapter,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
     ...(options.operatorResolver !== undefined
       ? { operatorResolver: options.operatorResolver }
       : {}),

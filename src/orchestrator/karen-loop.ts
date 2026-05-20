@@ -30,6 +30,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import type { Dependencies } from "@intx/inference";
 import type { ReactorDirector } from "@intx/types/runtime";
 
 import {
@@ -146,6 +147,13 @@ export interface RunKarenLoopForTaskOptions {
   apiKey: string;
   /** Inference adapter (e.g. "openai", "anthropic"). Required. */
   adapter: string;
+  /**
+   * Inference-layer `Dependencies` forwarded to the greybeard agent
+   * factory. Production callers leave this undefined; tests thread the
+   * deterministic harness `deps` through so model calls are
+   * intercepted.
+   */
+  readonly deps?: Dependencies;
   /**
    * Optional scripted director passed through to the greybeard agent for
    * tests. Production callers leave undefined.
@@ -287,6 +295,7 @@ async function consultGreybeardAndProcess(args: {
     baseURL: options.baseURL,
     apiKey: options.apiKey,
     adapter: options.adapter,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
     ...(options.greybeardDirector !== undefined
       ? { director: options.greybeardDirector }
       : {}),
