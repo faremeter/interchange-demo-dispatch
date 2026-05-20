@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dispatch/
+tsconfig.tsbuildinfo
+.eslintcache
+tmp/
+.DS_Store
+.env
+.env.*

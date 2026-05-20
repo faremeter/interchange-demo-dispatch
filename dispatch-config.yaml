@@ -1,0 +1,13 @@
+buildGate:
+  - bun run lint
+  - bun run build
+  - bun run test
+
+modelConfig:
+  planner: opencode-go/kimi-k2.6
+  implementer: opencode-go/kimi-k2.6
+  critic: opencode-go/kimi-k2.6
+  gateCritic: opencode-go/kimi-k2.6
+  greybeard: opencode-go/kimi-k2.6
+  attribution: opencode-go/kimi-k2.6
+  fixAgent: opencode-go/kimi-k2.6
