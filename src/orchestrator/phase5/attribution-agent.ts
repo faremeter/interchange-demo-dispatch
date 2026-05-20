@@ -15,11 +15,9 @@
 // reads" is fully controlled by the orchestrator, not by the
 // agent's own tool calls. (spec.md §521-§534.)
 //
-// Following the same agent-handle pattern as `karen-loop.ts`'s
-// `GreybeardAgentHandle` and `run-level.ts`'s
-// `ImplementerAgentHandle`, this module exposes
-// `AttributionAgentHandle` so tests can stub `send` / `close` without
-// having to implement the full `@intx/agent` `Agent` shape.
+// This module exposes `AttributionAgentHandle` so tests can stub
+// `send` / `close` without having to implement the full `@intx/agent`
+// `Agent` shape.
 
 import {
   createAgent,
@@ -70,8 +68,7 @@ export interface AttributionResult {
  * Minimal agent surface the orchestrator needs from an attribution
  * agent handle. Production code (`createAttributionAgent`) returns a
  * full `@intx/agent` `Agent` which satisfies this structurally; tests
- * provide a stub with `send` and `close` only. Mirrors
- * `GreybeardAgentHandle` / `ImplementerAgentHandle`.
+ * provide a stub with `send` and `close` only.
  */
 export interface AttributionAgentHandle {
   send(content: string): Promise<unknown>;

@@ -39,9 +39,9 @@ export type ModelConfig = typeof modelConfigSchema.infer;
  * the `provider` hint (typically `openai` for opencode-go's
  * OpenAI-compatible endpoint).
  *
- * Optional in the schema so that test-only runs driven through
- * `--scripts` (which inject their own canned runners) do not have to
- * carry it.
+ * Optional in the schema so that tests driving `runDispatch` through
+ * the `@intx/inference-testing` harness (which substitutes for the
+ * provider via `Dependencies`) do not have to carry it.
  */
 export const providerConfigSchema = type({
   baseURL: "string",

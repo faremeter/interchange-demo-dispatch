@@ -68,12 +68,6 @@ export interface PlanOptions {
    */
   readonly runStatePath?: string;
   /**
-   * Test seam. When provided, this function is used instead of
-   * `createPlannerAgent` to produce the `FinalizedPlan`. Production
-   * callers should leave this unset.
-   */
-  readonly plannerOverride?: (args: PlannerOverrideArgs) => Promise<FinalizedPlan>;
-  /**
    * Inference-layer `Dependencies` forwarded to `createPlannerAgent` →
    * `createAgent`. Tests pass `setupHarness().deps` from
    * `@intx/inference-testing` so the planner's model calls route through
@@ -81,13 +75,6 @@ export interface PlanOptions {
    * callers omit this.
    */
   readonly deps?: Dependencies;
-}
-
-export interface PlannerOverrideArgs {
-  readonly specPath: string;
-  readonly specText: string;
-  readonly targetRepoPath: string;
-  readonly seedMessage: string;
 }
 
 /**
@@ -130,28 +117,18 @@ export async function plan(run: Run, options: PlanOptions): Promise<Run> {
     skillBlob,
   });
 
-  let finalized: FinalizedPlan;
-  if (options.plannerOverride) {
-    finalized = await options.plannerOverride({
-      specPath: run.specPath,
-      specText,
-      targetRepoPath,
-      seedMessage,
-    });
-  } else {
-    finalized = await runPlannerAgent({
-      specPath: run.specPath,
-      skillBlob,
-      targetRepoPath,
-      contextDir: join(options.contextDirRoot, "_planner"),
-      model: options.config.modelConfig.planner,
-      baseURL: options.baseURL,
-      apiKey: options.apiKey,
-      adapter: options.adapter,
-      seedMessage,
-      ...(options.deps !== undefined ? { deps: options.deps } : {}),
-    });
-  }
+  const finalized = await runPlannerAgent({
+    specPath: run.specPath,
+    skillBlob,
+    targetRepoPath,
+    contextDir: join(options.contextDirRoot, "_planner"),
+    model: options.config.modelConfig.planner,
+    baseURL: options.baseURL,
+    apiKey: options.apiKey,
+    adapter: options.adapter,
+    seedMessage,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
+  });
 
   const tasks = materializeTasks(finalized);
 

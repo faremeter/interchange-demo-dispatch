@@ -1300,7 +1300,7 @@ export { writeFinalReport, renderFinalReport } from "./final-report.js";
 export { levelsOf } from "./level-iterator.js";
 
 export { initRun, type InitRunResult } from "./init.js";
-export { plan, type PlanOptions, type PlannerOverrideArgs } from "./plan.js";
+export { plan, type PlanOptions } from "./plan.js";
 export {
   loadDispatchConfig,
   dispatchConfigSchema,

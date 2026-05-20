@@ -40,8 +40,7 @@ import { join } from "node:path";
 import { stringify as stringifyYAML } from "yaml";
 
 import { AgentClosedError } from "@intx/agent";
-import type { Dependencies, ReactorEmittedEvent } from "@intx/inference";
-import type { ReactorDirector } from "@intx/types/runtime";
+import type { Dependencies } from "@intx/inference";
 
 import { writeRun } from "../state/persist.js";
 import type {
@@ -52,7 +51,6 @@ import type {
 } from "../state/types.js";
 import {
   createImplementerAgent,
-  type CreateImplementerAgentOptions,
   type SubmittedDeviation,
   type SubmittedOutput,
 } from "../agents/implementer.js";
@@ -62,7 +60,6 @@ import {
 } from "./worktree.js";
 import {
   runKarenLoopForTask,
-  type GreybeardSpawner,
   type KarenLoopResult,
   type OperatorResolver,
 } from "./karen-loop.js";
@@ -70,68 +67,6 @@ import {
   checkUnreportedModifications,
   type GitStatusExecutor,
 } from "./unreported-mods.js";
-
-export interface ImplementerSpawnInput {
-  task: Task;
-  worktreePath: string;
-  contextDir: string;
-  model: string;
-  baseURL: string;
-  apiKey: string;
-  /**
-   * Inference adapter name (e.g. "openai" for opencode-go's
-   * OpenAI-compatible endpoint, "anthropic" for Anthropic's API).
-   * Forwarded to `createImplementerAgent` so the underlying
-   * `ProviderConfig.provider` reaches the inference harness.
-   * Required.
-   */
-  readonly adapter: string;
-  /**
-   * Inference-layer `Dependencies` (fetch stub, clock, etc.) forwarded
-   * to the implementer agent factory. Production callers leave this
-   * undefined; tests pass `setupHarness().deps` from
-   * `@intx/inference-testing` to intercept model calls.
-   */
-  readonly deps?: Dependencies;
-  director?: ReactorDirector;
-}
-
-/**
- * Minimal agent surface the run-level loop needs from an implementer handle.
- * Production code (`createImplementerAgent`) returns a full `Agent`, which
- * satisfies this structurally; tests provide a stub with just `send` and
- * `close`. Mirrors the `GreybeardAgentHandle` pattern in `karen-loop.ts`.
- */
-export interface ImplementerAgentHandle {
-  send(content: string): Promise<unknown>;
-  close(): Promise<void>;
-  /**
-   * Event stream exposed by `@intx/agent`'s `Agent`. The orchestrator
-   * drains it concurrently with `send` so provider-side errors
-   * (inference.error) surface to stderr instead of vanishing into a
-   * silently-closed reactor.
-   */
-  stream(): AsyncIterable<ReactorEmittedEvent>;
-}
-
-export type ImplementerSpawner = (
-  input: ImplementerSpawnInput,
-) => Promise<{
-  agent: ImplementerAgentHandle;
-  awaitSubmitOutput: Promise<SubmittedOutput>;
-}>;
-
-export interface DirectorFactoryInput {
-  task: Task;
-}
-
-/**
- * Closure that constructs a `ReactorDirector` for a specific task. The
- * production code path leaves this undefined and the implementer agent talks
- * to a real provider over HTTP. Tests pass a factory that returns a scripted
- * director per task id.
- */
-export type DirectorFactory = (input: DirectorFactoryInput) => ReactorDirector;
 
 export interface RunLevelOptions {
   /** Run document. The function returns a new document; the input is not mutated. */
@@ -169,21 +104,6 @@ export interface RunLevelOptions {
    * shape) and threads it through.
    */
   maxParallel?: number;
-  /**
-   * Per-task scripted-director factory. When provided, the spawner builds
-   * the implementer with the returned director instead of the production
-   * default. Tests pass this to bypass HTTP.
-   */
-  directorFactory?: DirectorFactory;
-  /**
-   * Per-task greybeard scripted-director factory. Forwarded into the
-   * Karen-loop spawner.
-   */
-  greybeardDirectorFactory?: DirectorFactory;
-  /** Injectable implementer spawner; defaults to `createImplementerAgent`. */
-  implementerSpawner?: ImplementerSpawner;
-  /** Injectable greybeard spawner; defaults to `createGreybeardAgent`. */
-  greybeardSpawner?: GreybeardSpawner;
   /** Injectable operator resolver; defaults to `awaitOperatorResolution`. */
   operatorResolver?: OperatorResolver;
   /** Injectable git executor; forwarded into worktree provisioning. */
@@ -362,11 +282,7 @@ async function dispatchOneTask(args: {
   options: RunLevelOptions;
 }): Promise<TaskDispatchOutcome> {
   const { task, paths, worktreePath, options } = args;
-  const spawner = options.implementerSpawner ?? defaultImplementerSpawner;
-
-  const director = options.directorFactory?.({ task });
-  const spawnInput: ImplementerSpawnInput = {
-    task,
+  const handle = await createImplementerAgent({
     worktreePath,
     contextDir: paths.contextDir,
     model: options.model,
@@ -374,9 +290,7 @@ async function dispatchOneTask(args: {
     apiKey: options.apiKey,
     adapter: options.adapter,
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
-    ...(director !== undefined ? { director } : {}),
-  };
-  const handle = await spawner(spawnInput);
+  });
 
   // Drain the implementer agent's event stream so any inference.error
   // surfaces to stderr — without this, a 4xx from the provider drops
@@ -431,7 +345,6 @@ async function dispatchOneTask(args: {
   const deviations = submitted.deviations.map(
     (d, idx): Deviation => promoteDeviation(d, task.id, idx),
   );
-  const greybeardDirector = options.greybeardDirectorFactory?.({ task });
   const karenResult = await runKarenLoopForTask({
     task,
     deviations,
@@ -445,12 +358,6 @@ async function dispatchOneTask(args: {
     apiKey: options.apiKey,
     adapter: options.adapter,
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
-    ...(greybeardDirector !== undefined
-      ? { greybeardDirector }
-      : {}),
-    ...(options.greybeardSpawner !== undefined
-      ? { greybeardSpawner: options.greybeardSpawner }
-      : {}),
     ...(options.operatorResolver !== undefined
       ? { operatorResolver: options.operatorResolver }
       : {}),
@@ -563,18 +470,3 @@ async function runWithConcurrency<T, R>(
   await Promise.all(workers);
   return results;
 }
-
-const defaultImplementerSpawner: ImplementerSpawner = async (input) => {
-  const spawnOptions: CreateImplementerAgentOptions = {
-    worktreePath: input.worktreePath,
-    contextDir: input.contextDir,
-    model: input.model,
-    baseURL: input.baseURL,
-    apiKey: input.apiKey,
-    adapter: input.adapter,
-    ...(input.deps !== undefined ? { deps: input.deps } : {}),
-    ...(input.director !== undefined ? { director: input.director } : {}),
-  };
-  const impl = await createImplementerAgent(spawnOptions);
-  return { agent: impl.agent, awaitSubmitOutput: impl.awaitSubmitOutput };
-};

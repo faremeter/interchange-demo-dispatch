@@ -31,7 +31,6 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Dependencies } from "@intx/inference";
-import type { ReactorDirector } from "@intx/types/runtime";
 
 import {
   karenInitialAction,
@@ -77,36 +76,6 @@ export interface KarenLoopResult {
   finalState: KarenLoopFinalState;
   decisions: KarenDecisionRecord[];
 }
-
-/**
- * Minimal agent interface the karen-loop needs from a greybeard handle. The
- * production factory's `Agent` satisfies this structurally; tests provide a
- * stub with just `send` and `close` (typed as `unknown` for `send`'s return
- * since the karen-loop only depends on `.catch()` resolving). This subset is
- * exposed instead of the full `Agent` type so tests do not need to
- * implement (or `as`-cast through) the rest of the surface.
- */
-export interface GreybeardAgentHandle {
-  send(content: string): Promise<unknown>;
-  close(): Promise<void>;
-}
-
-/**
- * Closure that spawns the greybeard agent. Production callers wire this to
- * `createGreybeardAgent` plus the model config; tests pass a stub that
- * returns a scripted-director agent.
- */
-export type GreybeardSpawner = (
-  options: CreateGreybeardAgentOptions,
-) => Promise<{
-  agent: GreybeardAgentHandle;
-  awaitVerdict: Promise<{
-    taskId: string;
-    deviationId: string;
-    verdict: GreybeardVerdict;
-    rationale: string;
-  }>;
-}>;
 
 /**
  * Closure that, given the run directory + escalation context, returns the
@@ -155,16 +124,6 @@ export interface RunKarenLoopForTaskOptions {
    */
   readonly deps?: Dependencies;
   /**
-   * Optional scripted director passed through to the greybeard agent for
-   * tests. Production callers leave undefined.
-   */
-  greybeardDirector?: ReactorDirector;
-  /**
-   * Optional injectable spawner; defaults to `createGreybeardAgent`.
-   * Tests typically inject a stub that bypasses the real factory.
-   */
-  greybeardSpawner?: GreybeardSpawner;
-  /**
    * Optional injectable operator resolver; defaults to
    * `awaitOperatorResolution`. Tests inject a deterministic stub.
    */
@@ -186,7 +145,6 @@ export async function runKarenLoopForTask(
   options: RunKarenLoopForTaskOptions,
 ): Promise<KarenLoopResult> {
   const decisions: KarenDecisionRecord[] = [];
-  const spawner = options.greybeardSpawner ?? defaultGreybeardSpawner;
   const operatorResolver =
     options.operatorResolver ?? buildDefaultOperatorResolver(options);
 
@@ -216,7 +174,6 @@ export async function runKarenLoopForTask(
           deviation,
           task: options.task,
           options,
-          spawner,
           record,
         });
         const followUp = await actOnFinalAction({
@@ -274,10 +231,9 @@ async function consultGreybeardAndProcess(args: {
   deviation: Deviation;
   task: Task;
   options: RunKarenLoopForTaskOptions;
-  spawner: GreybeardSpawner;
   record: KarenDecisionRecord;
 }): Promise<KarenFinalAction> {
-  const { deviation, task, options, spawner, record } = args;
+  const { deviation, task, options, record } = args;
   const consultationDir = join(
     options.greybeardContextRoot,
     `${task.id}--${deviation.id}`,
@@ -296,11 +252,8 @@ async function consultGreybeardAndProcess(args: {
     apiKey: options.apiKey,
     adapter: options.adapter,
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
-    ...(options.greybeardDirector !== undefined
-      ? { director: options.greybeardDirector }
-      : {}),
   };
-  const handle = await spawner(spawnOptions);
+  const handle = await createGreybeardAgent(spawnOptions);
   try {
     const seed = buildGreybeardSeedMessage(
       task.id,
@@ -402,11 +355,6 @@ function buildEscalationDetails(
   }
   return details;
 }
-
-const defaultGreybeardSpawner: GreybeardSpawner = async (opts) => {
-  const gb = await createGreybeardAgent(opts);
-  return { agent: gb.agent, awaitVerdict: gb.awaitVerdict };
-};
 
 function buildDefaultOperatorResolver(
   options: RunKarenLoopForTaskOptions,
