@@ -413,6 +413,7 @@ function buildPlanOptions(input: RunStageInput): PlanOptions {
     apiKey: provider.apiKey,
     adapter: provider.adapter,
     contextDirRoot,
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
   };
 }
 

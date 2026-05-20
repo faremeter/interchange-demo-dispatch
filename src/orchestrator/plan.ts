@@ -32,6 +32,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import type { Dependencies } from "@intx/inference";
+
 import {
   buildPlannerSeedMessage,
   createPlannerAgent,
@@ -71,6 +73,14 @@ export interface PlanOptions {
    * callers should leave this unset.
    */
   readonly plannerOverride?: (args: PlannerOverrideArgs) => Promise<FinalizedPlan>;
+  /**
+   * Inference-layer `Dependencies` forwarded to `createPlannerAgent` →
+   * `createAgent`. Tests pass `setupHarness().deps` from
+   * `@intx/inference-testing` so the planner's model calls route through
+   * the deterministic harness instead of `globalThis.fetch`. Production
+   * callers omit this.
+   */
+  readonly deps?: Dependencies;
 }
 
 export interface PlannerOverrideArgs {
@@ -139,6 +149,7 @@ export async function plan(run: Run, options: PlanOptions): Promise<Run> {
       apiKey: options.apiKey,
       adapter: options.adapter,
       seedMessage,
+      ...(options.deps !== undefined ? { deps: options.deps } : {}),
     });
   }
 
@@ -171,6 +182,7 @@ interface RunPlannerArgs {
   readonly apiKey: string;
   readonly adapter: string;
   readonly seedMessage: string;
+  readonly deps?: Dependencies;
 }
 
 async function runPlannerAgent(args: RunPlannerArgs): Promise<FinalizedPlan> {
@@ -184,6 +196,7 @@ async function runPlannerAgent(args: RunPlannerArgs): Promise<FinalizedPlan> {
     apiKey: args.apiKey,
     adapter: args.adapter,
     seedMessage: args.seedMessage,
+    ...(args.deps !== undefined ? { deps: args.deps } : {}),
   });
 
   // Drain the agent's event stream concurrently with `send` so any
