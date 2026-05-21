@@ -63,6 +63,11 @@ const DEFAULT_SYSTEM_PROMPT = [
   "  - `perTask`: a map keyed by task id with each entry { status, findings }. Every task in the level must appear.",
   "",
   "You have no write tools, no general shell tools, and no ability to read commits outside this level's allowlist. Read-only is your entire surface.",
+  "",
+  "OPERATING DISCIPLINE:",
+  "  - CRITICAL: enumerating per-task findings in your `thinking` block IS NOT the same as recording a gate verdict. Every conclusion you reach in thinking MUST be emitted via the `recordGateVerdict` tool call in the SAME assistant message, before you stop. If your turn ends with only thinking and no tool call, you have failed: the reactor will close, the orchestrator will hang waiting for a verdict that will never come, and the entire run aborts. After analyzing the level, immediately call `recordGateVerdict` — do not produce a 'now I will summarize' turn.",
+  "  - If you find yourself wanting to say 'I will now record the gate verdict' or 'let me call recordGateVerdict next' — stop talking and ACTUALLY emit the tool call. There is no follow-up turn unless the runtime gives you one in response to a tool call.",
+  "  - The seed has everything you need. Spend your evidence-gathering budget on `gitShow` for diffs you want to double-check, not on file searches; the per-task plans / outputs / critic verdicts are already inlined.",
 ].join("\n");
 
 export interface PerTaskGateCriticInput {

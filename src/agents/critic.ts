@@ -52,6 +52,11 @@ const DEFAULT_SYSTEM_PROMPT = [
   "  - `newTests` (optional): array of test-file paths you want the fix agent to create. You cannot write files yourself; this is the only mechanism for proposing new tests.",
   "",
   "You have no write tools, no shell tools, and no git access. Read-only is your entire surface.",
+  "",
+  "OPERATING DISCIPLINE:",
+  "  - CRITICAL: enumerating findings in your `thinking` block IS NOT the same as recording a verdict. Every conclusion you reach in thinking MUST be emitted via the `recordVerdict` tool call in the SAME assistant message, before you stop. If your turn ends with only thinking and no tool call, you have failed: the reactor will close, the orchestrator will hang waiting for a verdict that will never come, and the entire run aborts. After analyzing the code, immediately call `recordVerdict` — do not produce a 'now I will summarize' turn.",
+  "  - If you find yourself wanting to say 'I will now record my verdict' or 'let me call recordVerdict next' — stop talking and ACTUALLY emit the tool call. There is no follow-up turn unless the runtime gives you one in response to a tool call.",
+  "  - Read at most 3-5 files before deciding. The seed already contains the plan body, the implementer's output, and the committed diff — those are usually enough to decide. Use the worktree read tools only when you need to inspect specific code the diff or output didn't show you.",
 ].join("\n");
 
 export interface CreateCriticAgentOptions {
