@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 
 export interface GitAddAndCommitArgs {
   /** Absolute path to the git worktree the commit is created in. */
@@ -45,7 +47,39 @@ export async function gitAddAndCommit(
     );
   }
 
-  await runGit(worktreePath, ["add", "--", ...files]);
+  // Filter out paths that don't actually exist in the worktree. Models
+  // sometimes hallucinate file names in their `filesModified` claim
+  // (e.g. claiming `src/csv.validation.test.ts` after only writing
+  // `src/csv.test.ts`). Staging a non-existent path makes `git add`
+  // exit non-zero with "pathspec ... did not match any files" and
+  // aborts the run, so drop hallucinated claims here and proceed with
+  // the real subset. The post-commit `unreportedModifications` scan
+  // independently catches the inverse failure (real modifications that
+  // weren't claimed).
+  const existing: string[] = [];
+  const missing: string[] = [];
+  for (const file of files) {
+    const absolute = join(worktreePath, file);
+    try {
+      await stat(absolute);
+      existing.push(file);
+    } catch {
+      missing.push(file);
+    }
+  }
+  if (missing.length > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `gitAddAndCommit: dropping ${String(missing.length)} hallucinated path(s) not present on disk: ${missing.join(", ")}`,
+    );
+  }
+  if (existing.length === 0) {
+    throw new Error(
+      `gitAddAndCommit: every claimed path was missing from the worktree (${files.join(", ")}); nothing to commit`,
+    );
+  }
+
+  await runGit(worktreePath, ["add", "--", ...existing]);
   await runGit(worktreePath, ["commit", `--message=${message}`]);
   const sha = await runGit(worktreePath, ["rev-parse", "HEAD"]);
   return sha.trim();

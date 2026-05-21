@@ -104,6 +104,12 @@ export async function initRun(spec: SpecRef): Promise<InitRunResult> {
     levelBoundaries: {},
     gateVerdicts: [],
     verificationRounds: [],
+    // Placeholder values; the planner overwrites both in `plan()` after
+    // `finalizePlan` resolves. We default to the conservative
+    // `baseline-equality` so a resume from a pre-plan run-state.yaml
+    // would still get a strict Phase 5 if the planner never runs.
+    verificationMode: "baseline-equality",
+    verificationModeRationale: "",
     createdAt: new Date().toISOString(),
   };
 

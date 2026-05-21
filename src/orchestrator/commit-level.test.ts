@@ -109,6 +109,8 @@ function makeRun(args: {
     levelBoundaries: args.levelBoundaries,
     gateVerdicts: [],
     verificationRounds: [],
+    verificationMode: "baseline-equality",
+    verificationModeRationale: "",
     createdAt: "2026-05-20T00:00:00Z",
   };
 }

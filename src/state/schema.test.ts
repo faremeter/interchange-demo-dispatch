@@ -141,6 +141,8 @@ const validRun: Run = {
   levelBoundaries: { "0": "deadbeef" },
   gateVerdicts: [],
   verificationRounds: [],
+  verificationMode: "baseline-equality",
+  verificationModeRationale: "",
   createdAt: "2026-05-20T00:00:00Z",
 };
 

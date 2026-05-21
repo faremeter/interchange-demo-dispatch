@@ -166,6 +166,23 @@ export interface VerifyAgainstBaselineOptions {
    * `normalizeBuildOutput`.
    */
   readonly normalizeExtraPathPrefixes?: readonly string[];
+  /**
+   * Comparison mode against the baseline log:
+   *
+   *   - `baseline-equality` (default): the normalized final build output
+   *     must be byte-equal to the normalized baseline. Any textual
+   *     difference (even one without parseable failures) is treated as
+   *     a regression and escalates to the operator. Use for refactors
+   *     and migrations where the output should be preserved.
+   *   - `no-new-failures`: textual differences are tolerated as long as
+   *     no NEW parsed failures appear. Existing baseline failures may
+   *     disappear (they're treated as fixed). Use for bug-fix specs
+   *     where the baseline carries known failures the work repairs.
+   *
+   * `skip-comparison` runs are intercepted by the orchestrator before
+   * `verifyAgainstBaseline` is invoked, so it is not a valid value here.
+   */
+  readonly comparisonMode?: "baseline-equality" | "no-new-failures";
 }
 
 /**
@@ -219,6 +236,8 @@ export async function verifyAgainstBaseline(
     await mkdir(options.runDir, { recursive: true });
     await writeFile(finalLogPath, buildResult.output, "utf8");
 
+    const comparisonMode = options.comparisonMode ?? "baseline-equality";
+
     if (sameOutput(baselineLog, buildResult.output, normalizeOptions)) {
       working = appendVerificationRound({
         run: working,
@@ -238,12 +257,30 @@ export async function verifyAgainstBaseline(
       buildResult.output,
       normalizeOptions,
     );
+
+    // `no-new-failures` mode: textual difference WITHOUT new parsed
+    // failures is the expected good case. Pass through to consolidation
+    // without escalating.
+    if (comparisonMode === "no-new-failures" && newFailures.length === 0) {
+      working = appendVerificationRound({
+        run: working,
+        finalBuildLogPath: finalLogPath,
+        newFailures: [],
+        attribution: {},
+        rebuildFromLevel: null,
+        outcome: "pass",
+      });
+      working = setStatus(working, "consolidating");
+      await persist(options.runStatePath, working);
+      return working;
+    }
+
     if (newFailures.length === 0) {
-      // Normalized texts differ but no marker-based failure entries
-      // separate them: the spec (§679-§697) prefers acting on a
-      // textual difference rather than a parsed one. Treat the
-      // round as `retry` and escalate to the operator: the engine
-      // cannot attribute a failure it cannot name.
+      // `baseline-equality` mode: normalized texts differ but no
+      // marker-based failure entries separate them. The spec
+      // (§679-§697) prefers acting on a textual difference rather than
+      // a parsed one. Treat the round as `retry` and escalate to the
+      // operator: the engine cannot attribute a failure it cannot name.
       working = appendVerificationRound({
         run: working,
         finalBuildLogPath: finalLogPath,

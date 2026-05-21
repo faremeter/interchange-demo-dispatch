@@ -133,6 +133,13 @@ export type Task = {
   verificationFixRoundsTotal: number;
 };
 
+export const verificationModes = [
+  "baseline-equality",
+  "no-new-failures",
+  "skip-comparison",
+] as const;
+export type VerificationMode = (typeof verificationModes)[number];
+
 export type Run = {
   name: string;
   specPath: string;
@@ -146,5 +153,18 @@ export type Run = {
   levelBoundaries: Record<number, string>;
   gateVerdicts: GateVerdict[];
   verificationRounds: VerificationRound[];
+  /**
+   * Phase 5 verification mode. Defaults to `baseline-equality` for runs
+   * created before the planner emitted this field. The planner selects
+   * the mode based on the spec — see `verificationModes` in
+   * `agents/planner-types.ts` for the semantics of each.
+   */
+  verificationMode: VerificationMode;
+  /**
+   * Planner-supplied justification for `verificationMode`. Recorded so
+   * the final report can show why a given run did or did not run
+   * Phase 5 in strict mode.
+   */
+  verificationModeRationale: string;
   createdAt: string;
 };

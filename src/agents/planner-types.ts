@@ -50,7 +50,32 @@ const _classOk: ClassOk = true;
 void _agentTypeOk;
 void _classOk;
 
-export const finalizePlanArgsSchema = type({});
+// `verificationMode` drives Phase 5's behaviour over the captured baseline:
+//
+//   - `baseline-equality`: the post-run normalized build output must match
+//     the baseline byte-for-byte (modulo path / timestamp normalization).
+//     The correct choice for refactors, renames, migrations, and any other
+//     "make the code work the same after these changes" spec.
+//   - `no-new-failures`: the post-run output may differ from baseline, but
+//     no NEW parsed failures may appear. Existing baseline failures may
+//     disappear. The right choice for bug-fix specs and spec where the
+//     baseline carries known-failing tests the work is expected to repair.
+//   - `skip-comparison`: Phase 5 skips comparison entirely and proceeds
+//     straight to consolidation. The right choice for additive specs that
+//     legitimately change the build output (new tests, new modules, new
+//     CLI binaries). The baseline log is still captured and persisted as a
+//     diagnostic record; it just isn't used as a gate.
+export const verificationModes = [
+  "baseline-equality",
+  "no-new-failures",
+  "skip-comparison",
+] as const;
+
+export const finalizePlanArgsSchema = type({
+  verificationMode:
+    "'baseline-equality' | 'no-new-failures' | 'skip-comparison'",
+  verificationModeRationale: "string > 0",
+});
 export type FinalizePlanArgs = typeof finalizePlanArgsSchema.infer;
 
 // The proposal as the planner sees it. The runtime augments this with a
@@ -72,4 +97,6 @@ export interface ProposedTaskRecord {
 export interface FinalizedPlan {
   readonly tasks: readonly ProposedTaskRecord[];
   readonly levels: Readonly<Record<string, number>>;
+  readonly verificationMode: (typeof verificationModes)[number];
+  readonly verificationModeRationale: string;
 }

@@ -469,7 +469,24 @@ function buildGateOptions(input: GateOptionsInput): {
 
   const rebuildLevel: RebuildCallback = async (run, fromLevel) => {
     let next = run;
-    const ordered = levelsOf(next).filter((l) => l >= fromLevel);
+    // Only rebuild levels that have ALREADY been through commitLevel —
+    // i.e. every task is in `committed` / `completed` / `fixing`. Future
+    // levels that have not been dispatched yet carry pending tasks and
+    // would blow up inside computeAttribution. (Mirrors the same filter
+    // in the Phase 5 rebuildLevel further down.)
+    const isCommittedLevel = (l: number): boolean => {
+      const tasksAtLevel = next.tasks.filter((t) => t.level === l);
+      if (tasksAtLevel.length === 0) return false;
+      return tasksAtLevel.every(
+        (t) =>
+          t.status === "committed" ||
+          t.status === "completed" ||
+          t.status === "fixing",
+      );
+    };
+    const ordered = levelsOf(next)
+      .filter((l) => l >= fromLevel)
+      .filter(isCommittedLevel);
     for (const level of ordered) {
       next = await commitLevel(next, level, {
         worktreePath: input.levelWorktreePath,
@@ -755,6 +772,15 @@ async function runVerification(input: VerificationStageInput): Promise<Run> {
     return { ...run, status: "consolidating" };
   }
 
+  if (run.verificationMode === "skip-comparison") {
+    // Planner judged this run's spec to be additive (new tests, new
+    // modules, new behaviour) — the baseline log will legitimately
+    // differ from the final build output, so a strict equality check
+    // cannot converge. The baseline is still captured and persisted as
+    // a diagnostic record; Phase 5 just doesn't gate on it.
+    return { ...run, status: "consolidating" };
+  }
+
   const levels = levelsOf(run);
   const lastLevel = levels[levels.length - 1];
   if (lastLevel === undefined) {
@@ -802,7 +828,25 @@ async function runVerification(input: VerificationStageInput): Promise<Run> {
 
   const rebuildLevel: RebuildCallback = async (current, fromLevel) => {
     let next = current;
-    const orderedRebuild = levelsOf(next).filter((l) => l >= fromLevel);
+    // Only rebuild levels that have ALREADY been through commitLevel —
+    // i.e. every task at the level is in a post-submit status
+    // (`committed`, `completed`, or `fixing`). Future levels that have
+    // not been dispatched yet carry tasks in `pending` with no outputs;
+    // commitLevel would throw `computeAttribution requires every task at
+    // the level to carry a submitted output` on them.
+    const isCommittedLevel = (l: number): boolean => {
+      const tasksAtLevel = next.tasks.filter((t) => t.level === l);
+      if (tasksAtLevel.length === 0) return false;
+      return tasksAtLevel.every(
+        (t) =>
+          t.status === "committed" ||
+          t.status === "completed" ||
+          t.status === "fixing",
+      );
+    };
+    const orderedRebuild = levelsOf(next)
+      .filter((l) => l >= fromLevel)
+      .filter(isCommittedLevel);
     for (const level of orderedRebuild) {
       next = await commitLevel(next, level, {
         worktreePath,
@@ -824,6 +868,16 @@ async function runVerification(input: VerificationStageInput): Promise<Run> {
     return { run: result.run, outcome: result.outcome };
   };
 
+  // Map the planner's three-way `verificationMode` onto Phase 5's
+  // two-way `comparisonMode`. `skip-comparison` was already intercepted
+  // upstream (the `return { ...run, status: "consolidating" }` branch at
+  // the top of `runVerification`), so only the two strict modes reach
+  // this point.
+  const comparisonMode: "baseline-equality" | "no-new-failures" =
+    run.verificationMode === "no-new-failures"
+      ? "no-new-failures"
+      : "baseline-equality";
+
   const verifyOptions: VerifyAgainstBaselineOptions = {
     worktreePath,
     runDir,
@@ -837,6 +891,7 @@ async function runVerification(input: VerificationStageInput): Promise<Run> {
     gate: gateCallback,
     awaitOperatorResolution: buildOperatorResolutionCallback(runDir, options),
     committedDiffsByTaskId,
+    comparisonMode,
     ...(options.notify !== undefined ? { notify: options.notify } : {}),
     ...(options.verifyMaxLoops !== undefined ? { maxLoops: options.verifyMaxLoops } : {}),
   };

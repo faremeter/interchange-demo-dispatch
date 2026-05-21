@@ -112,6 +112,8 @@ function makeRun(over: Partial<Run> & { name: string; tasks: Task[] }): Run {
     levelBoundaries: {},
     gateVerdicts: [],
     verificationRounds: [],
+    verificationMode: "baseline-equality",
+    verificationModeRationale: "",
     createdAt: "2026-05-20T00:00:00Z",
   };
   return { ...base, ...over };

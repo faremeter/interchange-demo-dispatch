@@ -115,6 +115,23 @@ function proposeArgs(overrides: {
   };
 }
 
+function finalizeArgs(
+  overrides: Partial<{
+    verificationMode:
+      | "baseline-equality"
+      | "no-new-failures"
+      | "skip-comparison";
+    verificationModeRationale: string;
+  }> = {},
+) {
+  return {
+    verificationMode: overrides.verificationMode ?? "baseline-equality",
+    verificationModeRationale:
+      overrides.verificationModeRationale ??
+      "test default — preserve baseline output",
+  };
+}
+
 let targetRepo: string;
 let outsideDir: string;
 
@@ -154,7 +171,7 @@ describe("buildPlannerTools", () => {
     );
     expect(r3.isError).toBeUndefined();
 
-    const fin = await invoke(finalize, {});
+    const fin = await invoke(finalize, finalizeArgs());
     expect(fin.isError).toBeUndefined();
     expect(fin.content).toBe("ok");
 
@@ -197,7 +214,7 @@ describe("buildPlannerTools", () => {
     );
     expect(fix2.isError).toBeUndefined();
 
-    const fin = await invoke(finalize, {});
+    const fin = await invoke(finalize, finalizeArgs());
     expect(fin.isError).toBeUndefined();
 
     const plan = await tools.awaitFinalizedPlan;
@@ -219,7 +236,7 @@ describe("buildPlannerTools", () => {
       proposeArgs({ idHint: "feature", level: 4, dependsOn: ["bootstrap"] }),
     );
 
-    const badFin = await invoke(finalize, {});
+    const badFin = await invoke(finalize, finalizeArgs());
     expect(badFin.isError).toBe(true);
     if (typeof badFin.content === "string") {
       expect(badFin.content).toMatch(/DAG validation failed/);
@@ -264,7 +281,7 @@ describe("buildPlannerTools", () => {
   test("finalizePlan with no proposals is rejected", async () => {
     const tools = buildPlannerTools({ targetRepoPath: targetRepo });
     const finalize = findTool(tools.agentTools, "finalizePlan");
-    const res = await invoke(finalize, {});
+    const res = await invoke(finalize, finalizeArgs());
     expect(res.isError).toBe(true);
     if (typeof res.content === "string") {
       expect(res.content).toMatch(/no tasks/);
@@ -277,10 +294,10 @@ describe("buildPlannerTools", () => {
     const finalize = findTool(tools.agentTools, "finalizePlan");
 
     await invoke(propose, proposeArgs({ idHint: "only", level: 1 }));
-    const first = await invoke(finalize, {});
+    const first = await invoke(finalize, finalizeArgs());
     expect(first.isError).toBeUndefined();
 
-    const second = await invoke(finalize, {});
+    const second = await invoke(finalize, finalizeArgs());
     expect(second.isError).toBe(true);
     if (typeof second.content === "string") {
       expect(second.content).toMatch(/already finalized/);
@@ -293,7 +310,7 @@ describe("buildPlannerTools", () => {
     const finalize = findTool(tools.agentTools, "finalizePlan");
 
     await invoke(propose, proposeArgs({ idHint: "only", level: 1 }));
-    await invoke(finalize, {});
+    await invoke(finalize, finalizeArgs());
 
     const after = await invoke(propose, proposeArgs({ idHint: "late", level: 1 }));
     expect(after.isError).toBe(true);
@@ -310,7 +327,7 @@ describe("buildPlannerTools", () => {
     const second = await invoke(propose, proposeArgs({ idHint: "bootstrap", level: 1 }));
     expect(second.content).toBe('accepted: id="bootstrap-2"');
 
-    await invoke(finalize, {});
+    await invoke(finalize, finalizeArgs());
     const plan = await tools.awaitFinalizedPlan;
     expect(plan.tasks.map((t) => t.id)).toEqual(["bootstrap", "bootstrap-2"]);
   });

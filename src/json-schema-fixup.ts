@@ -59,7 +59,26 @@ function fixupObjectNode(node: Record<string, unknown>): Record<string, unknown>
     result["properties"] = mapObjectValues(properties);
   }
 
-  result["items"] = recurseIntoItems(result["items"]);
+  // arktype emits tuples in draft-2020-12 shape:
+  //   { type:"array", minItems:N, prefixItems:[...], items:false }
+  // Moonshot rejects `items: false` ("items must be an object") and does
+  // not understand `prefixItems`. Collapse the whole tuple description
+  // into a permissive `items: <single-schema-or-empty>` form.
+  if ("prefixItems" in result || result["items"] === false) {
+    const prefixItems = arrayOfUnknown(result["prefixItems"]);
+    if (!(prefixItems instanceof type.errors)) {
+      result["items"] = collapseTupleToSingleItem(
+        prefixItems.map((child) =>
+          fixupJsonSchemaForStrictValidators(child),
+        ),
+      );
+    } else if (result["items"] === false) {
+      result["items"] = {};
+    }
+    delete result["prefixItems"];
+  } else {
+    result["items"] = recurseIntoItems(result["items"]);
+  }
   result["additionalProperties"] = recurseIntoMaybeSchema(result["additionalProperties"]);
 
   for (const key of ["oneOf", "anyOf", "allOf"] as const) {
@@ -72,6 +91,15 @@ function fixupObjectNode(node: Record<string, unknown>): Record<string, unknown>
   }
 
   return result;
+}
+
+function collapseTupleToSingleItem(fixedChildren: unknown[]): unknown {
+  if (fixedChildren.length === 0) return {};
+  const [head, ...rest] = fixedChildren;
+  const allEqual = rest.every(
+    (child) => JSON.stringify(child) === JSON.stringify(head),
+  );
+  return allEqual ? head : {};
 }
 
 function shouldStampStringType(node: Record<string, unknown>): boolean {
@@ -91,9 +119,26 @@ function mapObjectValues(
 }
 
 function recurseIntoItems(items: unknown): unknown {
+  // arktype emits tuple types (e.g. `[number, number]`) as a JSON Schema
+  // `items` field whose value is an ARRAY of per-position schemas. That
+  // is valid draft-2019 tuple validation but Moonshot's flavored
+  // validator rejects it with "items must be an object". Collapse the
+  // array form into a single schema:
+  //   - if every position has the same shape, use that shape;
+  //   - otherwise use `{}` (no per-item constraint).
+  // The runtime check on the orchestrator side still validates against
+  // the original arktype tuple — Moonshot only sees the relaxed surface.
   const asArray = arrayOfUnknown(items);
   if (!(asArray instanceof type.errors)) {
-    return asArray.map((child) => fixupJsonSchemaForStrictValidators(child));
+    const fixedChildren = asArray.map((child) =>
+      fixupJsonSchemaForStrictValidators(child),
+    );
+    if (fixedChildren.length === 0) return {};
+    const [head, ...rest] = fixedChildren;
+    const allEqual = rest.every(
+      (child) => JSON.stringify(child) === JSON.stringify(head),
+    );
+    return allEqual ? head : {};
   }
   return recurseIntoMaybeSchema(items);
 }

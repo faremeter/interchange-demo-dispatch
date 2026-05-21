@@ -47,6 +47,8 @@ const sampleRun: Run = {
   levelBoundaries: { "0": "deadbeef", "1": "cafebabe" },
   gateVerdicts: [],
   verificationRounds: [],
+  verificationMode: "baseline-equality",
+  verificationModeRationale: "",
   createdAt: "2026-05-20T00:00:00Z",
 };
 

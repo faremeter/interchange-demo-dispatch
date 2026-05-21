@@ -84,6 +84,8 @@ function makeRun(name: string, boundaries: Record<number, string> = {}): Run {
     levelBoundaries: boundaries,
     gateVerdicts: [],
     verificationRounds: [],
+    verificationMode: "baseline-equality",
+    verificationModeRationale: "",
     createdAt: new Date().toISOString(),
   };
 }

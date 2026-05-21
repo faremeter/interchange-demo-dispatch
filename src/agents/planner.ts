@@ -75,7 +75,16 @@ const DEFAULT_SYSTEM_PROMPT = [
   "  - `verifyCommands`: array of shell commands the orchestrator should run to verify this task. An empty array means inherit the run-level build gate.",
   "  - `critiqueEnabled`: hint only. The runtime overrides this per role (general always critiqued, intern critiqued by default, explore never).",
   "",
-  "Once every task has been proposed, call `finalizePlan` with no arguments. The runtime validates the accumulated DAG (acyclic, unique ids, levels consistent with deps) and refuses on failure — the refusal lists the issues so you can propose corrections.",
+  "Once every task has been proposed, call `finalizePlan` with two required arguments:",
+  "  - `verificationMode`: one of `baseline-equality`, `no-new-failures`, or `skip-comparison`. This controls how the post-run build gate output is compared to the captured baseline:",
+  "    - `baseline-equality`: the final normalized build output must match the baseline byte-for-byte. Pick this for refactors, renames, migrations, and any other spec whose intent is 'make the code work the same after these changes'. The default when in doubt about a clearly-preservative spec.",
+  "    - `no-new-failures`: the output may differ from baseline but no NEW parsed failures may appear. Existing baseline failures are allowed to disappear. Pick this for bug-fix specs where the baseline carries known-failing tests the work is expected to repair, or where the spec changes behaviour in ways the build output will reflect but no regressions are acceptable.",
+  "    - `skip-comparison`: the baseline is not used as a gate. Pick this for additive specs — new modules, new CLI binaries, new test files — where the build output will legitimately differ (more passing tests, new lint targets, new compiled units) and an equality check is structurally meaningless. The baseline log is still captured for the diagnostic record; it just isn't compared.",
+  "  - `verificationModeRationale`: a short one-sentence justification for the chosen mode. This is recorded in the run report so a reviewer can see why Phase 5 ran (or didn't) in strict mode.",
+  "",
+  "  Choose `verificationMode` based on the SPEC, not the codebase. Read the spec's goal: does it say 'add', 'create', 'implement' (likely additive)? 'fix', 'repair', 'correct' (likely no-new-failures)? 'refactor', 'rename', 'migrate', 'split' (likely baseline-equality)? When the spec mixes categories, pick the most permissive mode that still catches the regressions you care about — better to let the gate skip than to spend operator time on guaranteed-impossible equality checks.",
+  "",
+  "The runtime validates the accumulated DAG (acyclic, unique ids, levels consistent with deps) and refuses on failure — the refusal lists the issues so you can propose corrections.",
   "",
   "You have read-only filesystem tools (read_file, grep, search_files) scoped to the target repository. You have no write tools; the only way you change the run is via `proposeTask` and `finalizePlan`.",
   "",
@@ -83,6 +92,8 @@ const DEFAULT_SYSTEM_PROMPT = [
   "  - Read at most 3-5 files to understand the repo, then START PROPOSING. Do not over-explore; the spec is your contract, not the existing code.",
   "  - After every read or search, ask: 'do I now have enough to propose the next task?' If yes, call `proposeTask`. Reading without proposing burns turn budget and risks the reactor closing before you finalize.",
   "  - `finalizePlan` is mandatory. A run with zero proposals or an unfinalized DAG is a wasted dispatch. If you are unsure about a detail, propose your best guess for the task — the implementer can adjust within its plan; you cannot recover a planner that never finalized.",
+  "  - CRITICAL: enumerating tasks in your `thinking` block IS NOT the same as proposing them. Every task you enumerate in thinking MUST be emitted via a `proposeTask` tool call in the SAME assistant message, before you stop. If your turn ends with only thinking and no tool calls, you have failed: the reactor will close, the run will abort, and your enumeration is wasted. After thinking through the DAG, immediately call `proposeTask` for each task in order, then call `finalizePlan`.",
+  "  - If you find yourself wanting to say 'I will now propose...' or 'next I'll call proposeTask...' — stop talking and ACTUALLY emit the tool call. There is no follow-up turn unless the runtime gives you one in response to a tool call.",
 ].join("\n");
 
 export interface PlannerAgentOptions {
@@ -310,7 +321,12 @@ function makeFinalize(
         );
       }
 
-      onSuccess({ tasks: [...proposals], levels: result.levels });
+      onSuccess({
+        tasks: [...proposals],
+        levels: result.levels,
+        verificationMode: parsed.verificationMode,
+        verificationModeRationale: parsed.verificationModeRationale,
+      });
       return {
         callId: call.id,
         content: "ok",

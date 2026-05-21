@@ -146,7 +146,16 @@ function parsePorcelain(stdout: string): string[] {
 
 const defaultGitStatusExecutor: GitStatusExecutor = ({ cwd }) => {
   return new Promise<GitStatusResult>((resolve, reject) => {
-    const child = spawn("git", ["status", "--porcelain"], { cwd });
+    // `--untracked-files=all` expands newly-created untracked directories
+    // into every individual file they contain. Without it, porcelain
+    // reports a single entry like `?? src/` for a brand-new directory,
+    // which never matches the file-level paths an implementer claims
+    // (e.g. `src/csv.ts`) and surfaces as a spurious unclaimed entry.
+    const child = spawn(
+      "git",
+      ["status", "--porcelain", "--untracked-files=all"],
+      { cwd },
+    );
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => {

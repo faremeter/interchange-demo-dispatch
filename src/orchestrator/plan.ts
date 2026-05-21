@@ -142,6 +142,8 @@ export async function plan(run: Run, options: PlanOptions): Promise<Run> {
   const updated: Run = {
     ...run,
     tasks,
+    verificationMode: finalized.verificationMode,
+    verificationModeRationale: finalized.verificationModeRationale,
     status: "executing",
   };
 

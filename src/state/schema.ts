@@ -118,5 +118,7 @@ export const runSchema = type({
   levelBoundaries: type.Record("string", "string"),
   gateVerdicts: gateVerdictSchema.array(),
   verificationRounds: verificationRoundSchema.array(),
+  verificationMode: "'baseline-equality' | 'no-new-failures' | 'skip-comparison'",
+  verificationModeRationale: "string",
   createdAt: "string",
 });
