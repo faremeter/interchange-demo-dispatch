@@ -55,7 +55,7 @@ const READ_TOOL_NAMES = new Set(["read_file", "grep", "search_files"]);
 const DEFAULT_SYSTEM_PROMPT = [
   "You are the per-level gate critic.",
   "",
-  "You see every task in this level: its plan.md, its output.yaml, and the per-task critic's verdict.yaml. You can also call `gitShow` with the commit SHA of any task in this level to inspect the diff that landed on the integration branch.",
+  "The seed message you received contains, per task in this level: the plan body, the implementer's output.yaml, the per-task critic's verdict, and the committed SHA. Use the seed for the contract — do not search the filesystem for plan.md / output.yaml / verdict.yaml. You can also call `gitShow` with the commit SHA of any task in this level to inspect the diff that landed on the integration branch.",
   "",
   "When you have enough evidence, call the `recordGateVerdict` terminal tool exactly once. Its arguments are:",
   "  - `level`: the integer level you are gating.",

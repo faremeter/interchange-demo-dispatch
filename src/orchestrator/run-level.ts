@@ -373,12 +373,23 @@ async function dispatchOneTask(args: {
 }
 
 function buildImplementerSeed(task: Task): string {
+  // The on-disk plan.md lives at <runDir>/<taskId>/plan.md, which is
+  // OUTSIDE the implementer's path-escape root (the level worktree).
+  // The implementer's filesystem tools cannot reach it. Inline the
+  // plan body here so the model has everything it needs to act
+  // without searching for a file it cannot read.
   const lines: string[] = [];
   lines.push(`# Implementer task: ${task.id}`);
   lines.push("");
   lines.push(`Objective: ${task.objective}`);
   lines.push("");
-  lines.push("Make the changes described in your task plan inside the assigned worktree. Use `recordBuildResult` to log every build/lint/test command you run. Call `submitOutput` exactly once when finished.");
+  lines.push("## Task plan");
+  lines.push("");
+  lines.push(task.planMarkdown);
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+  lines.push("Make the changes described above inside the assigned worktree. Use `recordBuildResult` to log every build/lint/test command you run. Call `submitOutput` exactly once when finished.");
   return lines.join("\n");
 }
 

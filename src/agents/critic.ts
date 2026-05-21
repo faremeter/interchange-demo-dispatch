@@ -43,7 +43,7 @@ const READ_TOOL_NAMES = new Set(["read_file", "grep", "search_files"]);
 const DEFAULT_SYSTEM_PROMPT = [
   "You are a per-task critic.",
   "",
-  "You have read-only access to a single task's worktree. Read the task's plan.md and output.yaml, inspect the code the implementer touched (filesModified), and decide whether the work satisfies the plan.",
+  "You have read-only access to a single task's worktree. The task's plan, the implementer's output.yaml, and the committed diff are all embedded in the seed message you received — do not go searching the filesystem for them. Use the seed for the contract, your read-only tools (read_file / grep / search_files) to inspect the code in the worktree, and decide whether the work satisfies the plan.",
   "",
   "Call the `recordVerdict` terminal tool exactly once when you are done. Its arguments are:",
   "  - `taskId`: the id of the task you are critiquing.",

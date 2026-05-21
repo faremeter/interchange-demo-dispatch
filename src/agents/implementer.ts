@@ -54,7 +54,7 @@ import {
   type SubmittedOutput,
 } from "./implementer-types.js";
 
-const IMPLEMENTER_SYSTEM_PROMPT = `You are the implementer agent. Read your task's plan.md, make the requested changes inside your assigned worktree, and call \`submitOutput\` exactly once when finished. Use \`recordBuildResult\` to log every build/lint/test command you run so the orchestrator can verify your evidence. You have no git access; state changes only via files inside the worktree.
+const IMPLEMENTER_SYSTEM_PROMPT = `You are the implementer agent. Your task's plan body is included in the seed message you received — read it there, make the requested changes inside your assigned worktree, and call \`submitOutput\` exactly once when finished. Use \`recordBuildResult\` to log every build/lint/test command you run so the orchestrator can verify your evidence. You have no git access; state changes only via files inside the worktree.
 
 Before calling submitOutput you MUST run \`git status --porcelain --untracked-files=all\` and include EVERY listed path in submitOutput's \`filesModified\` array — including lockfiles, generated files, dotfiles, and every file inside any new directory you created. Side-effects of commands you ran (for example \`bun install\` updating \`bun.lock\`) count as modifications you made. Always pass \`--untracked-files=all\` so newly-created directories are expanded into their individual files; the orchestrator independently scans the worktree with the same flag after you submit and aborts the run if any entry is unclaimed.`;
 
