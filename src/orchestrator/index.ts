@@ -57,6 +57,7 @@ import { loadDispatchConfig } from "./config.js";
 import { buildFixAgentSeed } from "./fix-agent.js";
 import { runLevel, type RunLevelOptions } from "./run-level.js";
 import { commitLevel } from "./commit-level.js";
+import { consolidate } from "./consolidate.js";
 import {
   gate,
   type CriticRunner,
@@ -320,8 +321,13 @@ async function continueAfterPlan(args: ContinueAfterPlanArgs): Promise<Run> {
     return working;
   }
 
-  working = { ...working, status: "done" };
-  await writeRun(runStatePath, working);
+  // Phase 5 leaves the run in `consolidating`. The consolidate step
+  // fast-forwards the integration branch to the last-level tip and
+  // sets status to `done`. Idempotent — re-running it is a no-op.
+  working = await consolidate(working, {
+    repoRoot: targetRepoPath,
+    runStatePath,
+  });
   working = await finalizeReport(working, runDir, runStatePath, options.now);
   return working;
 }
@@ -363,6 +369,18 @@ async function continueAfterResume(args: ContinueAfterResumeArgs): Promise<Run> 
       options,
       specName: spec.runName,
     });
+  }
+
+  if (resumed.status === "consolidating") {
+    // All levels committed, Phase 5 signed off; only the integration-
+    // branch fast-forward + the `done` status flip + the final report
+    // remain. `consolidate` is idempotent so re-entering it is safe
+    // even if the previous run died after one of the inner git ops.
+    const next = await consolidate(resumed, {
+      repoRoot: targetRepoPath,
+      runStatePath,
+    });
+    return finalizeReport(next, runDir, runStatePath, options.now);
   }
 
   throw new Error(
