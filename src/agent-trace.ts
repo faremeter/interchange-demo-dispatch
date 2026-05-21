@@ -37,8 +37,23 @@
  * the sink is responsible for adding one when writing to a stream. The
  * canonical production wiring is `(line) => process.stderr.write(line + "\n")`,
  * which keeps stdout reserved for the report path the CLI emits at end.
+ *
+ * Either a bare function (compact mode — one summary line per turn) or
+ * an object carrying a `verbose: true` flag (streaming mode — thinking
+ * and terminal-text appear line-by-line as the model emits them).
  */
-export type AgentTrace = (line: string) => void;
+export type AgentTrace =
+  | ((line: string) => void)
+  | { write: (line: string) => void; verbose?: boolean };
+
+function resolveTrace(trace: AgentTrace | undefined): {
+  write?: (line: string) => void;
+  verbose: boolean;
+} {
+  if (trace === undefined) return { verbose: false };
+  if (typeof trace === "function") return { write: trace, verbose: false };
+  return { write: trace.write, verbose: trace.verbose ?? false };
+}
 
 interface StreamEvent {
   type: string;
@@ -55,6 +70,17 @@ interface AgentStream {
  * additionally, when `trace` is provided, formats every noteworthy event
  * into a single line and calls `trace(line)`.
  *
+ * The optional `verbose` flag changes the thinking / text rendering:
+ *
+ *   - `verbose: false` (default): thinking and text deltas are buffered
+ *     across the turn and flushed as a single truncated line on
+ *     `inference.done`. Compact; one line per turn.
+ *   - `verbose: true`: thinking and text are flushed line-by-line as
+ *     they stream, so the operator sees the model's reasoning appear
+ *     in near real time. The buffer is flushed on every newline the
+ *     model emits, with any trailing partial line held until the next
+ *     newline or the turn ends.
+ *
  * Returns a Promise that resolves when the stream ends (typically via
  * `agent.close()`). The caller is expected to await it in a `finally`
  * after closing the agent so no events are dropped.
@@ -64,9 +90,33 @@ export function drainAgentStream(
   label: string,
   trace?: AgentTrace,
 ): Promise<void> {
+  const { write, verbose } = resolveTrace(trace);
+
   return (async () => {
     let thinkingBuf = "";
     let textBuf = "";
+
+    const flushStreamingByNewlines = (
+      bufRef: { value: string },
+      prefix: string,
+    ) => {
+      if (write === undefined) return;
+      const lines = bufRef.value.split("\n");
+      // Keep the last (possibly-partial) line in the buffer; emit the
+      // rest as completed lines. If the buffer ended with a newline,
+      // the last element will be the empty string and we still hold it
+      // so we don't emit an empty line.
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i];
+        if (line === undefined) continue;
+        const trimmed = line.replace(/\s+$/, "");
+        if (trimmed.length > 0) {
+          write(`[${label}] ${prefix} ${trimmed}`);
+        }
+      }
+      bufRef.value = lines[lines.length - 1] ?? "";
+    };
+
     try {
       for await (const event of agent.stream()) {
         // Errors are always loud to stderr, regardless of whether a
@@ -75,37 +125,56 @@ export function drainAgentStream(
           const payload = extractErrorPayload(event.data);
           const serialized = safeJSONStringify(payload);
           console.error(`[${label}] inference.error: ${serialized}`);
-          if (trace !== undefined) {
-            trace(`[${label}] ERROR: ${oneLine(serialized, 300)}`);
+          if (write !== undefined) {
+            write(`[${label}] ERROR: ${oneLine(serialized, 300)}`);
           }
           continue;
         }
 
-        if (trace === undefined) continue;
+        if (write === undefined) continue;
 
         switch (event.type) {
           case "inference.thinking.delta": {
             const token = extractToken(event.data);
-            if (token !== null) thinkingBuf += token;
+            if (token === null) break;
+            thinkingBuf += token;
+            if (verbose) {
+              const ref = { value: thinkingBuf };
+              flushStreamingByNewlines(ref, "🧠");
+              thinkingBuf = ref.value;
+            }
             break;
           }
           case "inference.text.delta": {
             const token = extractToken(event.data);
-            if (token !== null) textBuf += token;
+            if (token === null) break;
+            textBuf += token;
+            if (verbose) {
+              const ref = { value: textBuf };
+              flushStreamingByNewlines(ref, "💬");
+              textBuf = ref.value;
+            }
             break;
           }
           case "inference.tool_call.end": {
             const formatted = formatToolCallEnd(event.data);
-            if (formatted !== null) trace(`[${label}] → ${formatted}`);
+            if (formatted !== null) write(`[${label}] → ${formatted}`);
             break;
           }
           case "inference.done": {
+            // Flush whatever survived in the buffers. In verbose mode
+            // this is the partial trailing line that hadn't seen a
+            // newline yet; in compact mode it's the entire turn.
             if (thinkingBuf.length > 0) {
-              trace(`[${label}] thinking: ${oneLine(thinkingBuf, 240)}`);
+              const limit = verbose ? 600 : 240;
+              const marker = verbose ? "🧠" : "thinking:";
+              write(`[${label}] ${marker} ${oneLine(thinkingBuf, limit)}`);
               thinkingBuf = "";
             }
             if (textBuf.length > 0) {
-              trace(`[${label}] text: ${oneLine(textBuf, 240)}`);
+              const limit = verbose ? 600 : 240;
+              const marker = verbose ? "💬" : "text:";
+              write(`[${label}] ${marker} ${oneLine(textBuf, limit)}`);
               textBuf = "";
             }
             break;

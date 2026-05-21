@@ -71,15 +71,23 @@ async function main(argv: readonly string[]): Promise<number> {
   if (argv[0] === "teardown") {
     return runTeardown(argv.slice(1));
   }
+  if (argv[0] === "clean") {
+    return runClean(argv.slice(1));
+  }
   return runDispatchVerb(argv);
 }
 
 async function runDispatchVerb(argv: readonly string[]): Promise<number> {
   const positional: string[] = [];
   let skipBaseline = false;
+  let verbose = false;
   for (const arg of argv) {
     if (arg === "--skip-baseline") {
       skipBaseline = true;
+      continue;
+    }
+    if (arg === "--verbose" || arg === "-v") {
+      verbose = true;
       continue;
     }
     if (arg.startsWith("--")) {
@@ -102,15 +110,21 @@ async function runDispatchVerb(argv: readonly string[]): Promise<number> {
   };
 
   const credentials = await loadProviderCredentialsFromEnv(dispatchConfigPath);
+  // Default trace sink writes one line per noteworthy agent event to
+  // stderr. Keeps stdout reserved for the report path. Operators who
+  // want silence can pipe stderr to /dev/null; tests / library callers
+  // pass their own `trace` (or omit it entirely). `--verbose` opts into
+  // streaming thinking / terminal-text deltas line-by-line as they
+  // arrive so the operator can watch the model reason in real time.
+  const traceWrite = (line: string) => {
+    process.stderr.write(`${line}\n`);
+  };
+  const trace = verbose
+    ? { write: traceWrite, verbose: true }
+    : traceWrite;
   const options: RunDispatchOptions = {
     resume,
-    // Default trace sink writes one line per noteworthy agent event to
-    // stderr. Keeps stdout reserved for the report path. Operators who
-    // want silence can pipe stderr to /dev/null; tests / library callers
-    // pass their own `trace` (or omit it entirely).
-    trace: (line) => {
-      process.stderr.write(`${line}\n`);
-    },
+    trace,
     ...(credentials !== null ? { provider: credentials } : {}),
   };
   const run = await runDispatch(spec, options);
@@ -142,6 +156,164 @@ async function runTeardown(argv: readonly string[]): Promise<number> {
   }
   console.log(`removed ${String(seen.size)} worktree(s) for run ${runName}`);
   return 0;
+}
+
+/**
+ * Wipe a run from disk in full: removes every per-level worktree, every
+ * `dispatch/<run-name>/...` branch, and the `dispatch/<run-name>/`
+ * directory itself. Intended for the "I aborted a run, give me a clean
+ * slate" workflow that operators previously had to handle with a
+ * three-line shell incantation. Idempotent — surviving artifacts from
+ * a partial run (no run-state.yaml, dangling worktrees, stale branches)
+ * are removed best-effort.
+ *
+ * Usage:
+ *
+ *   interchange-demo-dispatch clean <run-name>      # one run
+ *   interchange-demo-dispatch clean --all           # every run in cwd
+ */
+async function runClean(argv: readonly string[]): Promise<number> {
+  const cwd = process.cwd();
+  const dispatchRoot = resolve(cwd, "dispatch");
+
+  let all = false;
+  const positional: string[] = [];
+  for (const arg of argv) {
+    if (arg === "--all") {
+      all = true;
+      continue;
+    }
+    if (arg.startsWith("--")) {
+      throw new Error(`unrecognized flag: ${arg}`);
+    }
+    positional.push(arg);
+  }
+
+  let runNames: string[];
+  if (all) {
+    if (positional.length > 0) {
+      throw new Error("clean --all takes no run-name positional");
+    }
+    if (!(await pathExists(dispatchRoot))) {
+      console.log(`no dispatch directory at ${dispatchRoot}; nothing to clean`);
+      return 0;
+    }
+    const { readdir } = await import("node:fs/promises");
+    runNames = await readdir(dispatchRoot);
+  } else {
+    const name = positional[0];
+    if (name === undefined) {
+      throw new Error(
+        "clean requires either a <run-name> argument or --all to wipe every run",
+      );
+    }
+    runNames = [name];
+  }
+
+  const { rm } = await import("node:fs/promises");
+  for (const runName of runNames) {
+    const runDir = resolve(dispatchRoot, runName);
+
+    // Best-effort teardown via the persisted state, if it survived the
+    // crash. Failures here are non-fatal — we fall through to the
+    // git-level cleanup either way.
+    const runStatePath = resolve(runDir, "run-state.yaml");
+    if (await pathExists(runStatePath)) {
+      try {
+        const run = await loadRun(runStatePath);
+        const seen = new Set<string>();
+        for (const task of run.tasks) {
+          if (task.worktreePath === null) continue;
+          if (seen.has(task.worktreePath)) continue;
+          seen.add(task.worktreePath);
+          if (!(await pathExists(task.worktreePath))) continue;
+          try {
+            await tearDownLevelWorktree({
+              worktreePath: task.worktreePath,
+              repoRoot: run.targetRepoPath,
+            });
+          } catch {
+            // Ignore; git-level prune below handles dangling state.
+          }
+        }
+      } catch {
+        // Run state was unreadable; fall through to brute-force cleanup.
+      }
+    }
+
+    // Prune any worktrees git still knows about that point under the
+    // (about-to-be-deleted) run dir, then delete every dispatch branch
+    // for this run. `--force` is necessary because the branches were
+    // checked out into worktrees we just removed and git considers them
+    // unmerged.
+    await spawnGitInherit(cwd, ["worktree", "prune"]);
+    const branchPrefix = `dispatch/${runName}`;
+    const branches = await listBranches(cwd);
+    for (const branch of branches) {
+      if (branch === branchPrefix || branch.startsWith(`${branchPrefix}-`)) {
+        try {
+          await spawnGitInherit(cwd, ["branch", "-D", branch]);
+        } catch {
+          // Branch may have already been deleted by the worktree
+          // teardown above; harmless.
+        }
+      }
+    }
+
+    if (await pathExists(runDir)) {
+      await rm(runDir, { recursive: true, force: true });
+    }
+    console.log(`cleaned ${runName}`);
+  }
+
+  // If we cleaned everything and the dispatch dir is now empty, remove
+  // it so the working tree returns to its pre-run state.
+  if (all && (await pathExists(dispatchRoot))) {
+    const { readdir, rmdir } = await import("node:fs/promises");
+    const remaining = await readdir(dispatchRoot);
+    if (remaining.length === 0) {
+      await rmdir(dispatchRoot);
+    }
+  }
+
+  return 0;
+}
+
+async function spawnGitInherit(
+  cwd: string,
+  args: readonly string[],
+): Promise<void> {
+  const { spawn } = await import("node:child_process");
+  await new Promise<void>((resolveSpawn, rejectSpawn) => {
+    const child = spawn("git", [...args], { cwd, stdio: "ignore" });
+    child.on("error", rejectSpawn);
+    child.on("close", (code) => {
+      if (code === 0) resolveSpawn();
+      else rejectSpawn(new Error(`git ${args.join(" ")} exited ${String(code)}`));
+    });
+  });
+}
+
+async function listBranches(cwd: string): Promise<string[]> {
+  const { spawn } = await import("node:child_process");
+  return new Promise<string[]>((resolveSpawn, rejectSpawn) => {
+    const child = spawn(
+      "git",
+      ["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+      { cwd, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    const chunks: Buffer[] = [];
+    child.stdout.on("data", (c: Buffer) => chunks.push(c));
+    child.on("error", rejectSpawn);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        rejectSpawn(new Error(`git for-each-ref exited ${String(code)}`));
+        return;
+      }
+      const out = Buffer.concat(chunks).toString("utf8").trim();
+      resolveSpawn(out.length === 0 ? [] : out.split("\n"));
+    });
+  });
 }
 
 function defaultRunName(): string {
