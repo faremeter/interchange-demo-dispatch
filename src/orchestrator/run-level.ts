@@ -42,6 +42,7 @@ import { stringify as stringifyYAML } from "yaml";
 import { AgentClosedError } from "@intx/agent";
 import type { Dependencies } from "@intx/inference";
 
+import { drainAgentStream, type AgentTrace } from "../agent-trace.js";
 import { writeRun } from "../state/persist.js";
 import type {
   Deviation,
@@ -97,6 +98,12 @@ export interface RunLevelOptions {
    * `deps` through so model calls are intercepted.
    */
   readonly deps?: Dependencies;
+  /**
+   * Operator-facing sink for streamed agent activity. Forwarded into
+   * `drainAgentStream` for each implementer (and through `karen-loop`
+   * for greybeard consultations).
+   */
+  readonly trace?: AgentTrace;
   /**
    * Maximum parallel implementer agents. Defaults to the number of tasks in
    * the level (no cap). The orchestrator typically reads this from
@@ -295,21 +302,13 @@ async function dispatchOneTask(args: {
   // Drain the implementer agent's event stream so any inference.error
   // surfaces to stderr — without this, a 4xx from the provider drops
   // the reactor silently and the orchestrator only sees the terse
-  // AgentClosedError.
-  const drain = (async () => {
-    try {
-      for await (const event of handle.agent.stream()) {
-        if (event.type === "inference.error") {
-          // eslint-disable-next-line no-console
-          console.error(
-            `[implementer ${task.id}] inference.error: ${JSON.stringify(event.data?.error ?? event.data)}`,
-          );
-        }
-      }
-    } catch {
-      // The stream throws on agent close; not a failure to surface.
-    }
-  })();
+  // AgentClosedError. When `trace` is wired the same drain forwards
+  // thinking summaries / tool calls / terminal text to the operator.
+  const drain = drainAgentStream(
+    handle.agent,
+    `implementer ${task.id}`,
+    options.trace,
+  );
 
   let submitted: SubmittedOutput | null = null;
   try {
@@ -358,6 +357,7 @@ async function dispatchOneTask(args: {
     apiKey: options.apiKey,
     adapter: options.adapter,
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
+    ...(options.trace !== undefined ? { trace: options.trace } : {}),
     ...(options.operatorResolver !== undefined
       ? { operatorResolver: options.operatorResolver }
       : {}),

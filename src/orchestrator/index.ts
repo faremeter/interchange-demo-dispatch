@@ -41,6 +41,7 @@ import { join, resolve } from "node:path";
 
 import { parse as parseYAML } from "yaml";
 
+import { drainAgentStream, type AgentTrace } from "../agent-trace.js";
 import { createCriticAgent } from "../agents/critic.js";
 import {
   createGateCriticAgent,
@@ -167,6 +168,15 @@ export interface RunDispatchOptions {
    * spam stdout outside the report path.
    */
   readonly notify?: (message: string) => void;
+  /**
+   * Optional sink for streaming human-readable agent activity (thinking
+   * summaries, tool calls, terminal text) prefixed by which agent
+   * emitted each line. Forwarded to every spawn site's stream drain.
+   * Production wires this to stderr; tests usually leave it unset. See
+   * `src/agent-trace.ts` for the `AgentTrace` contract and the line
+   * format.
+   */
+  readonly trace?: AgentTrace;
   /**
    * Test seam: override "now" for the final report timestamp. The
    * forward path itself reads only `Date.now()`-derived values from
@@ -390,6 +400,7 @@ function buildPlanOptions(input: RunStageInput): PlanOptions {
     adapter: provider.adapter,
     contextDirRoot,
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
+    ...(options.trace !== undefined ? { trace: options.trace } : {}),
   };
 }
 
@@ -417,6 +428,7 @@ async function runOneLevel(input: LevelStageInput): Promise<Run> {
     apiKey: provider.apiKey,
     adapter: provider.adapter,
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
+    ...(options.trace !== undefined ? { trace: options.trace } : {}),
     ...(options.operatorResolver !== undefined
       ? { operatorResolver: options.operatorResolver }
       : {}),
@@ -555,7 +567,11 @@ function buildDefaultCriticRunner(input: GateOptionsInput): CriticRunner {
       ...(input.options.deps !== undefined ? { deps: input.options.deps } : {}),
     });
 
-    const drain = drainInferenceErrors(agent, `critic ${task.id} round-${String(round)}`);
+    const drain = drainAgentStream(
+      agent,
+      `critic ${task.id} round-${String(round)}`,
+      input.options.trace,
+    );
     try {
       const sendDone = agent.send(seed).then(() => "send-done" as const);
       const verdict = awaitVerdict.then((value) => ({
@@ -648,9 +664,10 @@ function buildDefaultGateCriticRunner(input: GateOptionsInput): GateCriticRunner
       ...(input.options.deps !== undefined ? { deps: input.options.deps } : {}),
     });
 
-    const drain = drainInferenceErrors(
+    const drain = drainAgentStream(
       agent,
       `gate-critic level-${String(level)} round-${String(round)}`,
+      input.options.trace,
     );
     try {
       const sendDone = agent.send(seed).then(() => "send-done" as const);
@@ -717,9 +734,10 @@ function buildDefaultFixAgentRunner(input: GateOptionsInput): FixAgentRunner {
       ...(input.options.deps !== undefined ? { deps: input.options.deps } : {}),
     });
 
-    const drain = drainInferenceErrors(
+    const drain = drainAgentStream(
       agent,
       `fix-agent ${task.id} round-${String(round)}`,
+      input.options.trace,
     );
     try {
       const sendDone = agent.send(seed).then(() => "send-done" as const);
@@ -1014,9 +1032,10 @@ function buildDefaultAttributionRunner(
       ...(input.options.deps !== undefined ? { deps: input.options.deps } : {}),
     });
 
-    const drain = drainInferenceErrors(
+    const drain = drainAgentStream(
       agent,
       `attribution round-${String(round)}`,
+      input.options.trace,
     );
     try {
       const sendDone = agent.send(seed).then(() => "send-done" as const);
@@ -1077,9 +1096,10 @@ function buildDefaultPhase5FixAgentRunner(
       ...(input.options.deps !== undefined ? { deps: input.options.deps } : {}),
     });
 
-    const drain = drainInferenceErrors(
+    const drain = drainAgentStream(
       agent,
       `phase5-fix-agent ${task.id} round-${String(round)}`,
+      input.options.trace,
     );
     try {
       const sendDone = agent.send(seed).then(() => "send-done" as const);
@@ -1171,37 +1191,6 @@ function readGitShow(
       resolvePromise(stdout);
     });
   });
-}
-
-/**
- * Drain an agent's event stream, surfacing `inference.error` events to
- * stderr so a 4xx from the provider does not silently drop the reactor.
- * Mirrors the pattern in `plan.ts` / `run-level.ts`.
- */
-function drainInferenceErrors(
-  agent: { stream(): AsyncIterable<{ type: string; data?: unknown }> },
-  label: string,
-): Promise<void> {
-  return (async () => {
-    try {
-      for await (const event of agent.stream()) {
-        if (event.type === "inference.error") {
-          const payload =
-            typeof event.data === "object" &&
-            event.data !== null &&
-            "error" in event.data
-              ? (event.data as { error: unknown }).error
-              : event.data;
-          // eslint-disable-next-line no-console
-          console.error(
-            `[${label}] inference.error: ${JSON.stringify(payload)}`,
-          );
-        }
-      }
-    } catch {
-      // The stream throws on agent close; not a failure to surface.
-    }
-  })();
 }
 
 interface CriticSeedInput {

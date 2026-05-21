@@ -104,6 +104,13 @@ async function runDispatchVerb(argv: readonly string[]): Promise<number> {
   const credentials = await loadProviderCredentialsFromEnv(dispatchConfigPath);
   const options: RunDispatchOptions = {
     resume,
+    // Default trace sink writes one line per noteworthy agent event to
+    // stderr. Keeps stdout reserved for the report path. Operators who
+    // want silence can pipe stderr to /dev/null; tests / library callers
+    // pass their own `trace` (or omit it entirely).
+    trace: (line) => {
+      process.stderr.write(`${line}\n`);
+    },
     ...(credentials !== null ? { provider: credentials } : {}),
   };
   const run = await runDispatch(spec, options);

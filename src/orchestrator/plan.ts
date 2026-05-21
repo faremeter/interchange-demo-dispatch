@@ -34,6 +34,7 @@ import { join, resolve } from "node:path";
 
 import type { Dependencies } from "@intx/inference";
 
+import { drainAgentStream, type AgentTrace } from "../agent-trace.js";
 import {
   buildPlannerSeedMessage,
   createPlannerAgent,
@@ -75,6 +76,12 @@ export interface PlanOptions {
    * callers omit this.
    */
   readonly deps?: Dependencies;
+  /**
+   * Operator-facing sink for streamed agent activity. Forwarded into
+   * `drainAgentStream` so thinking summaries / tool calls / terminal
+   * text show up alongside the existing `inference.error` log.
+   */
+  readonly trace?: AgentTrace;
 }
 
 /**
@@ -128,6 +135,7 @@ export async function plan(run: Run, options: PlanOptions): Promise<Run> {
     adapter: options.adapter,
     seedMessage,
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
+    ...(options.trace !== undefined ? { trace: options.trace } : {}),
   });
 
   const tasks = materializeTasks(finalized);
@@ -162,6 +170,7 @@ interface RunPlannerArgs {
   readonly adapter: string;
   readonly seedMessage: string;
   readonly deps?: Dependencies;
+  readonly trace?: AgentTrace;
 }
 
 async function runPlannerAgent(args: RunPlannerArgs): Promise<FinalizedPlan> {
@@ -181,22 +190,10 @@ async function runPlannerAgent(args: RunPlannerArgs): Promise<FinalizedPlan> {
   // Drain the agent's event stream concurrently with `send` so any
   // inference.error / tool.* event the reactor emits surfaces to the
   // orchestrator's stderr — without this, a 4xx from the provider
-  // silently drops the reactor on the floor.
-  const drain = (async () => {
-    try {
-      for await (const event of agent.stream()) {
-        if (event.type === "inference.error") {
-          // eslint-disable-next-line no-console
-          console.error(
-            `[planner] inference.error: ${JSON.stringify(event.data?.error ?? event.data)}`,
-          );
-        }
-      }
-    } catch {
-      // The stream ends with an error when the agent closes; that is
-      // not a failure mode we need to surface from the drain itself.
-    }
-  })();
+  // silently drops the reactor on the floor. When `trace` is wired the
+  // same drain forwards thinking summaries / tool calls / terminal text
+  // to the operator.
+  const drain = drainAgentStream(agent, "planner", args.trace);
 
   try {
     // Race agent.send (which drives the reactor; resolves when the

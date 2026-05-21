@@ -32,6 +32,8 @@ import { join } from "node:path";
 
 import type { Dependencies } from "@intx/inference";
 
+import { drainAgentStream, type AgentTrace } from "../agent-trace.js";
+
 import {
   karenInitialAction,
   karenProcessGreybeardVerdict,
@@ -123,6 +125,11 @@ export interface RunKarenLoopForTaskOptions {
    * intercepted.
    */
   readonly deps?: Dependencies;
+  /**
+   * Operator-facing sink for streamed agent activity. Forwarded into
+   * `drainAgentStream` for the greybeard consultations Karen spawns.
+   */
+  readonly trace?: AgentTrace;
   /**
    * Optional injectable operator resolver; defaults to
    * `awaitOperatorResolution`. Tests inject a deterministic stub.
@@ -254,6 +261,14 @@ async function consultGreybeardAndProcess(args: {
     ...(options.deps !== undefined ? { deps: options.deps } : {}),
   };
   const handle = await createGreybeardAgent(spawnOptions);
+  // Drain the greybeard's event stream so `inference.error` events
+  // (and, when wired, traced thinking / tool calls) reach the
+  // operator. Closed in the finally below alongside the agent.
+  const drain = drainAgentStream(
+    handle.agent,
+    `greybeard ${task.id}`,
+    options.trace,
+  );
   try {
     const seed = buildGreybeardSeedMessage(
       task.id,
@@ -283,6 +298,7 @@ async function consultGreybeardAndProcess(args: {
     return final;
   } finally {
     await handle.agent.close();
+    await drain;
   }
 }
 
