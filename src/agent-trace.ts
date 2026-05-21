@@ -95,6 +95,14 @@ export function drainAgentStream(
   return (async () => {
     let thinkingBuf = "";
     let textBuf = "";
+    // Cache of callId → tool name so `tool.done` events can render
+    // `← name: <result snippet>` lines. The name lives on the upstream
+    // `inference.tool_call.end` event; `tool.done` only carries the
+    // result + the callId. Without this map the operator sees tool
+    // calls fire but never their outputs, which masks every LSP
+    // backed tool's actual return (file contents, diagnostics,
+    // grep matches, etc.).
+    const callIdToName = new Map<string, string>();
 
     const flushStreamingByNewlines = (
       bufRef: { value: string },
@@ -157,8 +165,27 @@ export function drainAgentStream(
             break;
           }
           case "inference.tool_call.end": {
-            const formatted = formatToolCallEnd(event.data);
-            if (formatted !== null) write(`[${label}] → ${formatted}`);
+            const parsed = parseToolCallEnd(event.data);
+            if (parsed !== null) {
+              if (parsed.callId !== null) {
+                callIdToName.set(parsed.callId, parsed.name);
+              }
+              write(`[${label}] → ${parsed.name}(${parsed.argSummary})`);
+            }
+            break;
+          }
+          case "tool.done": {
+            const parsed = parseToolDone(event.data);
+            if (parsed !== null) {
+              const name = callIdToName.get(parsed.callId) ?? "?";
+              const marker = parsed.isError ? "← ERR" : "←";
+              write(
+                `[${label}] ${marker} ${name}: ${oneLine(
+                  parsed.contentSummary,
+                  verbose ? 600 : 240,
+                )}`,
+              );
+            }
             break;
           }
           case "inference.done": {
@@ -206,15 +233,56 @@ function extractToken(data: unknown): string | null {
   return null;
 }
 
-function formatToolCallEnd(data: unknown): string | null {
+interface ParsedToolCallEnd {
+  readonly name: string;
+  readonly callId: string | null;
+  readonly argSummary: string;
+}
+
+function parseToolCallEnd(data: unknown): ParsedToolCallEnd | null {
   if (typeof data !== "object" || data === null) return null;
   const d = data as {
     name?: unknown;
+    callId?: unknown;
     arguments?: unknown;
   };
   const name = typeof d.name === "string" ? d.name : "?";
-  const args = formatArgs(d.arguments);
-  return `${name}(${args})`;
+  const callId = typeof d.callId === "string" ? d.callId : null;
+  const argSummary = formatArgs(d.arguments);
+  return { name, callId, argSummary };
+}
+
+interface ParsedToolDone {
+  readonly callId: string;
+  readonly contentSummary: string;
+  readonly isError: boolean;
+}
+
+function parseToolDone(data: unknown): ParsedToolDone | null {
+  if (typeof data !== "object" || data === null) return null;
+  const result = (data as { result?: unknown }).result;
+  if (typeof result !== "object" || result === null) return null;
+  const r = result as {
+    callId?: unknown;
+    content?: unknown;
+    isError?: unknown;
+  };
+  if (typeof r.callId !== "string") return null;
+  const isError = r.isError === true;
+  const content = r.content;
+  let contentSummary: string;
+  if (typeof content === "string") {
+    contentSummary = content;
+  } else if (typeof content === "object" && content !== null) {
+    try {
+      contentSummary = JSON.stringify(content);
+    } catch {
+      contentSummary = "(unserializable)";
+    }
+  } else {
+    contentSummary = String(content);
+  }
+  return { callId: r.callId, contentSummary, isError };
 }
 
 function formatArgs(args: unknown): string {
