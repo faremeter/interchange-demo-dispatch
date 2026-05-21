@@ -48,10 +48,15 @@ project. The full pipeline:
    Blocking findings trigger a bounded amendment loop (three rounds
    silent, four-plus requires operator confirmation).
 7. **Verifies the final build** against a baseline captured before the
-   run started. If new failures appear, an attribution agent maps them
-   to responsible tasks, fix agents repair them, the affected commits
-   are rebuilt, and critique re-runs — until either the build is clean
-   or escalation triggers.
+   run started, in one of three modes chosen by the planner based on
+   the spec: `baseline-equality` (output must match; refactors /
+   migrations), `no-new-failures` (output may differ but no new parsed
+   failures; bug fixes), or `skip-comparison` (baseline kept as a
+   diagnostic record but not used as a gate; additive specs that add
+   new tests / modules / binaries). When new failures do appear, an
+   attribution agent maps them to responsible tasks, fix agents repair
+   them, the affected commits are rebuilt, and critique re-runs — until
+   either the build is clean or escalation triggers.
 8. **Normalizes any of seven enumerated interruption points** on
    resume (mid-task crash, mid-rebuild, mid-Phase-5 fix loop, etc.)
    so a network blip or a kill-9 does not lose persisted state.
@@ -97,12 +102,15 @@ bun test ./examples/smoke-test.ts
 The fixture target lives in `examples/fixtures/sample-target/`. The
 smoke spec is `examples/hello-world-spec.md`. The smoke test routes
 every inference call through the `@intx/inference-testing`
-deterministic harness, so no model provider is contacted; the test
-asserts the structural Definition-of-Success criteria the harness can
-exercise (DoS 1-4: planner DAG shape, per-level worktrees, per-task
-+ gate critique, fan-in commits). DoS 5 (Phase 5 vs. baseline) and
-DoS 6 (resume) are deferred; the rationale lives in
-`examples/smoke-test.ts`'s file header.
+deterministic harness, so no model provider is contacted; it asserts
+the structural Definition-of-Success criteria the harness can
+exercise (DoS 1-4 in the two-level end-to-end test: planner DAG
+shape, per-level worktrees, per-task + gate critique, fan-in commits)
+plus DoS 5 (Phase 5 verification against a captured baseline, using
+the orchestrator's `buildGateRunner` shell-execution boundary) and
+DoS 6 (resume from a persisted `planning` state, asserting the
+`resume` hook fires exactly once and the second `runDispatch` does
+not re-run `initRun`).
 
 The full repository test suite:
 
@@ -118,18 +126,23 @@ a `provider` block in `dispatch-config.yaml` and export the bearer
 credential:
 
 ```sh
-OPENCODE_API_KEY=... interchange-demo-dispatch [run-name] [--skip-baseline]
+OPENCODE_API_KEY=... interchange-demo-dispatch [run-name] [--skip-baseline] [--verbose]
 ```
 
+`--verbose` opts into live streaming of the model's reasoning to
+stderr; without it you get a one-line-per-turn summary. To wipe a
+run from disk after aborting, `interchange-demo-dispatch clean <run-name>`.
+
 See [Configuration](#configuration) for the `dispatch-config.yaml`
-schema and [CLI](#cli) for the full verb / flag surface.
+schema, [CLI](#cli) for the full verb / flag surface, and [Streaming
+output](#streaming-output) for the trace format.
 
 ## CLI
 
-`interchange-demo-dispatch` exposes two verbs (see `src/cli.ts`):
+`interchange-demo-dispatch` exposes three verbs (see `src/cli.ts`):
 
 ```
-interchange-demo-dispatch [run-name] [--skip-baseline]
+interchange-demo-dispatch [run-name] [--skip-baseline] [--verbose|-v]
     Run a dispatch against ./spec.md and ./dispatch-config.yaml in
     the current working directory. State lands under
     `<cwd>/dispatch/<run-name>/`. `run-name` defaults to a
@@ -139,11 +152,60 @@ interchange-demo-dispatch teardown <run-name>
     Remove every per-level worktree associated with the named run.
     Does not delete the dispatch directory or its contents — the
     operator-inspectable `report.md` and `run-state.yaml` survive.
+
+interchange-demo-dispatch clean <run-name>
+interchange-demo-dispatch clean --all
+    Wipe a run from disk in full: removes every per-level worktree,
+    deletes every `dispatch/<run-name>/...` branch, and removes the
+    `dispatch/<run-name>/` directory itself. Use after aborting a run
+    when you want a clean slate. Idempotent and tolerant of partial
+    state (corrupt run-state.yaml, dangling worktrees, stale branches).
+    `--all` wipes every run in the current working directory's
+    `dispatch/` and removes the `dispatch/` root if it ends up empty.
 ```
 
-`--skip-baseline` is the operator-facing surface for greenfield
+`--skip-baseline` hard-overrides baseline capture for greenfield
 bootstraps where the build gate does not yet exist; Phase 5
-short-circuits in that mode.
+short-circuits in that mode regardless of the planner's
+`verificationMode` choice.
+
+`--verbose` (or `-v`) switches the default stderr trace from one
+summary line per turn to streaming the model's thinking and terminal
+text line-by-line as they arrive (with 🧠 and 💬 markers
+respectively) so the operator can watch reasoning appear in real
+time. Tool calls and errors render identically in both modes. See
+[Streaming output](#streaming-output) below for the on-the-wire
+shape and the programmatic `trace` option.
+
+## Streaming output
+
+Every agent the orchestrator spawns drains its inference event
+stream — `inference.error` payloads always reach stderr, and when
+`RunDispatchOptions.trace` is wired the same drain forwards
+human-readable lines for thinking, tool calls, and terminal text.
+The CLI sets a stderr trace sink by default, so an operator running
+the binary sees live progress without any setup:
+
+```
+[planner] → read_file(path="package.json")
+[planner] thinking: I'll start by reading package.json to see what
+  scripts and dependencies are already declared, then…
+[planner] → proposeTask(idHint="install-arktype", level=1, …)
+[implementer 1a-install-arktype] → write_file(path="package.json", …)
+[implementer 1a-install-arktype] → run_shell(command="bun install")
+[critic 1a-install-arktype round-1] → recordVerdict(status="pass", …)
+[gate-critic level-1 round-1] → recordGateVerdict(status="pass", …)
+```
+
+stdout stays reserved for the report path the CLI prints at end.
+Operators who want silence can pipe stderr to `/dev/null`; library
+callers wire their own sink or omit it entirely (in which case only
+the `inference.error → stderr` behaviour fires).
+
+The `AgentTrace` type accepts either a bare `(line: string) => void`
+or `{ write, verbose: true }` for the streaming mode the
+`--verbose` flag wires up. See `src/agent-trace.ts` for the formatter
+and `drainAgentStream` for the per-event handling.
 
 ## Configuration
 
@@ -157,16 +219,16 @@ buildGate:
   - bun run test
 
 modelConfig:
-  planner: opencode-go/kimi-k2.6
-  implementer: opencode-go/kimi-k2.6
-  critic: opencode-go/kimi-k2.6
-  gateCritic: opencode-go/kimi-k2.6
-  greybeard: opencode-go/kimi-k2.6
-  attribution: opencode-go/kimi-k2.6
-  fixAgent: opencode-go/kimi-k2.6
+  planner: kimi-k2.6
+  implementer: kimi-k2.6
+  critic: kimi-k2.6
+  gateCritic: kimi-k2.6
+  greybeard: kimi-k2.6
+  attribution: kimi-k2.6
+  fixAgent: kimi-k2.6
 
 provider:
-  baseURL: https://opencode-go.example/v1
+  baseURL: https://opencode.ai/zen/go/v1
   adapter: openai
 ```
 
@@ -174,13 +236,36 @@ provider:
   orchestrator captures as the baseline, inherits as each task's
   default `verifyCommands`, and re-runs in Phase 5.
 - `modelConfig` — required. Per-role model string, threaded straight
-  through to the inference call.
+  through to the inference call. Use the model identifier the endpoint
+  expects (opencode-go accepts bare names like `kimi-k2.6`; some
+  proxies require a vendor prefix).
 - `provider` — optional. When present, both `baseURL` and `adapter`
   are required. `adapter` selects the inference HTTP API style:
   `"openai"` for OpenAI-compatible endpoints (including opencode-go),
   `"anthropic"` for the Anthropic API. The bearer credential comes
   from the `OPENCODE_API_KEY` env var; the CLI fails loudly when the
   block is declared but the env var is unset.
+
+The planner additionally decides a **Phase 5 verification mode** as
+part of finalizing the plan, persisted in `run-state.yaml` as
+`Run.verificationMode`. Three values:
+
+- `baseline-equality` — final build output must match the baseline
+  byte-for-byte (modulo path / timestamp normalization). Pick for
+  refactors / renames / migrations.
+- `no-new-failures` — final output may differ but no new parsed
+  failures may appear. Pick for bug fixes against a baseline with
+  known-failing tests.
+- `skip-comparison` — baseline captured for diagnostic record only;
+  Phase 5 skips the equality check. Pick for additive specs (new
+  modules, new CLI binaries, new tests).
+
+The planner's system prompt teaches the choice from the spec's
+verbs (`add` / `create` / `implement` → likely additive; `fix` /
+`repair` → likely no-new-failures; `refactor` / `rename` /
+`migrate` → likely baseline-equality). The CLI's `--skip-baseline`
+flag is the operator override — when set, no baseline is captured
+at all and Phase 5 is a no-op regardless of mode.
 
 ## Testing
 
@@ -258,7 +343,12 @@ src/
                    point from spec.md §632-§677.
   state/           Persisted Run document — arktype schemas, atomic YAML
                    writes, single source of truth for the orchestrator.
-  cli.ts           interchange-demo-dispatch binary (verbs: default = run; teardown).
+  cli.ts           interchange-demo-dispatch binary (verbs: default = run;
+                   teardown; clean).
+  agent-trace.ts   AgentTrace contract + drainAgentStream — the shared
+                   helper every spawn site uses to drain an agent's
+                   inference event stream and forward formatted lines
+                   to the operator-supplied trace sink.
   dag-validate.ts  Pure DAG validation used by both the planner agent
                    and resume.
   karen.ts         Deterministic policy: per-deviation severity → action.
@@ -294,11 +384,13 @@ spec.md            The brief that drove the build.
   selection is configured in `dispatch-config.yaml`'s `modelConfig`
   block; there is no model-routing layer beyond the adapter + the
   per-role model string.
-- **Two open bugs in rebuild semantics.** Documented in `dispatch/
-  interchange-demo-dispatch-poc/8a-smoke-spec/output.yaml`; the smoke test works
-  around them by seeding amendments at a leaf level. Fixing them in
-  `src/orchestrator/index.ts` and `src/orchestrator/commit-level.ts`
-  is a tracked follow-up.
+- **Limited resume coverage.** The resume pass classifies on-disk
+  state into seven interruption cases and normalizes each. Forward-
+  path re-entry from `planning` / `gating-plan` is wired; re-entry
+  from later statuses (`executing`, `verifying`, `fixing-verification`,
+  `consolidating`) throws with a clear error and the operator-facing
+  workaround. The `clean` verb exists precisely so aborting + re-running
+  is a one-command workflow until the rest of resume is wired.
 
 ## Architecture sketch
 
