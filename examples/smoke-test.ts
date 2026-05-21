@@ -210,6 +210,24 @@ function planBody(taskId: string, level: number, summary: string): string {
 // already-accepted proposals, and `finalizePlan` is terminal — it resolves
 // the orchestrator's awaitFinalizedPlan promise and runDispatch closes the
 // agent before any follow-up inference call can fire).
+//
+// `finalizePlan` requires `verificationMode` and
+// `verificationModeRationale` since INTR-87's sibling work in commit
+// 773ada0. The helper below provides a default pair used by every
+// smoke test; individual tests can override `mode` to exercise the
+// non-default Phase 5 behaviours.
+function finalizePlanArgsJSON(
+  mode:
+    | "baseline-equality"
+    | "no-new-failures"
+    | "skip-comparison" = "baseline-equality",
+): string {
+  return JSON.stringify({
+    verificationMode: mode,
+    verificationModeRationale: `smoke test — ${mode}`,
+  });
+}
+
 function buildPlannerToolCallsThreeTask(): {
   callId: string;
   name: string;
@@ -265,7 +283,7 @@ function buildPlannerToolCallsThreeTask(): {
     { callId: "call-propose-greet", name: "proposeTask", argsJSON: JSON.stringify(greetArgs) },
     { callId: "call-propose-format", name: "proposeTask", argsJSON: JSON.stringify(formatArgs) },
     { callId: "call-propose-wire", name: "proposeTask", argsJSON: JSON.stringify(wireArgs) },
-    { callId: "call-finalize", name: "finalizePlan", argsJSON: "{}" },
+    { callId: "call-finalize", name: "finalizePlan", argsJSON: finalizePlanArgsJSON() },
   ];
 }
 
@@ -495,7 +513,7 @@ function buildPlannerToolCallsTwoTask(): {
       name: "proposeTask",
       argsJSON: JSON.stringify(wireArgs),
     },
-    { callId: "call-finalize", name: "finalizePlan", argsJSON: "{}" },
+    { callId: "call-finalize", name: "finalizePlan", argsJSON: finalizePlanArgsJSON() },
   ];
 }
 
@@ -1016,7 +1034,7 @@ function buildPlannerToolCallsSingleTask(): {
       name: "proposeTask",
       argsJSON: JSON.stringify(greetArgs),
     },
-    { callId: "call-finalize", name: "finalizePlan", argsJSON: "{}" },
+    { callId: "call-finalize", name: "finalizePlan", argsJSON: finalizePlanArgsJSON() },
   ];
 }
 
